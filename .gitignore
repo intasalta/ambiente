@@ -1,0 +1,15 @@
+# Credenciales sensibles de Google Cloud y Earth Engine (NUNCA SUBIR A GITHUB)
+ee-*.json
+*.json
+.streamlit/secrets.toml
+
+# Entornos virtuales y Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
