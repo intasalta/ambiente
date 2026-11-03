@@ -884,9 +884,9 @@ def get_ee_tile_layer(ee_image_object, vis_params, name, shown=True):
 # ---------------------------------------------------------------------------
 def main():
     # Encabezado institucional limpio (el logo permanece en la barra lateral)
-    st.markdown('<div class="app-title">INTA AMBIENTE</div>', unsafe_allow_html=True)
-    st.markdown('<div class="app-subtitle">Plataforma de Ambientación Multivariada, Fenología Satelital y Muestreo a Campo</div>', unsafe_allow_html=True)
-    st.markdown('<span class="app-badge">Proyecto PATCHACO • Grupo RRNN INTA EEA Salta</span>', unsafe_allow_html=True)
+    st.title("🌾 INTA AMBIENTE")
+    st.markdown("##### Plataforma de Ambientación Multivariada, Fenología Satelital y Muestreo a Campo")
+    st.caption("🏛️ **Proyecto PATCHACO** • Grupo de Recursos Naturales (RRNN) • **INTA EEA Salta**")
 
     st.markdown("---")
 
@@ -1727,12 +1727,8 @@ def main():
         st.info("👋 Para comenzar, dibuja un polígono en el mapa inicial o sube un archivo KML/GeoJSON en la barra lateral.")
 
     # Pie de página institucional
-    st.markdown("""
-    <div class="footer-credits">
-        <b>INTA AMBIENTE</b> • Instituto Nacional de Tecnología Agropecuaria (INTA) • Estación Experimental Agropecuaria Salta<br>
-        Diseñado por <b>Lic. Inf. Hernan Elena</b> (Grupo de Recursos Naturales) • Proyecto PATCHACO
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("---")
+    st.caption("🏛️ **INTA AMBIENTE** • Instituto Nacional de Tecnología Agropecuaria (INTA) • Estación Experimental Agropecuaria Salta  \n👨‍💻 Diseñado por **Lic. Inf. Hernan Elena** (Grupo de Recursos Naturales) • Proyecto PATCHACO")
 
 
 if __name__ == "__main__":
