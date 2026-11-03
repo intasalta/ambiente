@@ -25,6 +25,9 @@ from shapely.geometry import shape, mapping, Polygon, MultiPolygon, Point
 import plotly.express as px
 import plotly.graph_objects as go
 
+# Constante de protección operativa para no saturar Google Earth Engine
+MAX_SUPERFICIE_HA = 10000.0
+
 # ---------------------------------------------------------------------------
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTILOS CSS
 # ---------------------------------------------------------------------------
@@ -854,6 +857,7 @@ def main():
             "Cargar archivo de lote (.kml, .geojson, .json):",
             type=["kml", "geojson", "json"]
         )
+        st.sidebar.caption("💡 Límite operativo: hasta **10.000 ha** por parcela.")
         if uploaded_file is not None:
             file_bytes = uploaded_file.read()
             fname = uploaded_file.name.lower()
@@ -958,7 +962,22 @@ def main():
         help="Cantidad de sitios representativos georreferenciados a generar por cada ambiente para verificar a campo."
     )
 
-    run_btn = st.sidebar.button("🚀 Procesar Ambientación", use_container_width=True) or st.session_state.pop("trigger_process", False)
+    # Verificación preventiva de límite de área para el botón de la barra lateral
+    sidebar_disabled = False
+    if st.session_state["current_aoi"] is not None:
+        try:
+            gdf_chk = gpd.GeoDataFrame(geometry=[st.session_state["current_aoi"]], crs="EPSG:4326").to_crs(epsg=3857)
+            ha_chk = gdf_chk.geometry.area.iloc[0] / 10000.0
+            if ha_chk > MAX_SUPERFICIE_HA:
+                sidebar_disabled = True
+        except Exception:
+            pass
+
+    run_btn = st.sidebar.button(
+        "🚀 Procesar Ambientación",
+        use_container_width=True,
+        disabled=sidebar_disabled
+    ) or (st.session_state.pop("trigger_process", False) and not sidebar_disabled)
 
     if st.session_state["current_aoi"] is not None:
         if st.sidebar.button("🔄 Cambiar Lote / Nuevo Dibujo", use_container_width=True):
@@ -980,7 +999,7 @@ def main():
     # CASO A: Aún no tenemos polígono
     if st.session_state["current_aoi"] is None and aoi_source == "✏️ Dibujar en el Mapa":
         st.markdown("### 🗺️ Paso 1: Dibuja tu parcela en el mapa interactivo")
-        st.caption("Navega por el mapa o usa la herramienta de geoposicionamiento en la barra lateral. Utiliza el icono de polígono o rectángulo (arriba a la izquierda) para trazar los límites del lote.")
+        st.caption("Navega por el mapa o usa la herramienta de geoposicionamiento en la barra lateral. Utiliza el icono de polígono o rectángulo (arriba a la izquierda) para trazar los límites del lote (límite operativo máximo: **10.000 ha**).")
 
         map_center = st.session_state["geo_pin"] if st.session_state["geo_pin"] else [-24.90, -65.48]
         map_zoom = 15 if st.session_state["geo_pin"] else 13
@@ -1053,15 +1072,19 @@ def main():
 
         gdf_temp = gpd.GeoDataFrame(geometry=[shapely_aoi], crs="EPSG:4326").to_crs(epsg=3857)
         lote_ha = round(gdf_temp.geometry.area.iloc[0] / 10000.0, 2)
+        excede_limite = lote_ha > MAX_SUPERFICIE_HA
 
         # Banner de Métricas Responsivas (diseño que no se desborda en pantalla)
         strategy_short = ambientacion_mode.split(":")[0].replace("🌟", "").replace("🌿", "").replace("🌾", "").replace("💧", "").replace("🎯", "").strip()
+        metric_sup_color = "color: #e63946; font-weight: bold;" if excede_limite else ""
+        metric_sup_sub = "⚠️ Excede 10.000 ha" if excede_limite else "Área de Parcela"
+
         st.markdown(f"""
         <div class="metrics-container">
             <div class="metric-pill">
                 <div class="metric-pill-label">Superficie Total</div>
-                <div class="metric-pill-value">{lote_ha} ha</div>
-                <div class="metric-pill-sub">Área de Parcela</div>
+                <div class="metric-pill-value" style="{metric_sup_color}">{lote_ha} ha</div>
+                <div class="metric-pill-sub">{metric_sup_sub}</div>
             </div>
             <div class="metric-pill">
                 <div class="metric-pill-label">Período Temporal</div>
@@ -1076,10 +1099,19 @@ def main():
             <div class="metric-pill">
                 <div class="metric-pill-label">Estrategia Aplicada</div>
                 <div class="metric-pill-value">{strategy_short}</div>
-                <div class="metric-pill-sub">{num_zones} Zonas Homogéneas</div>
+                <div class="metric-pill-sub">{num_zones} Ambientes</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        if excede_limite:
+            st.error(
+                f"⛔ **Límite de superficie superado ({lote_ha:,.2f} ha):**\n\n"
+                f"El tamaño máximo admitido por análisis es de **{int(MAX_SUPERFICIE_HA):,} hectáreas**. "
+                f"Este control de seguridad previene la saturación de cuota y tiempos de espera excesivos en Google Earth Engine, "
+                f"garantizando que la plataforma se mantenga ágil y estable para todos los usuarios.\n\n"
+                f"👉 **Recomendación:** Por favor, acota el dibujo en el mapa o divide tu archivo KML/GeoJSON en potreros o sectores menores a 10.000 ha."
+            )
 
         # Si aún no se procesó, mostrar vista previa del lote y botón de inicio
         if st.session_state["results"] is None:
@@ -1124,9 +1156,12 @@ def main():
             st_folium(m_prev, width="100%", height=460, key="preview_map", returned_objects=[])
 
             col_btn1, col_btn2 = st.columns([3, 1])
-            if col_btn1.button("🚀 Iniciar Procesamiento de Ambientación", type="primary", use_container_width=True):
-                st.session_state["trigger_process"] = True
-                st.rerun()
+            if excede_limite:
+                col_btn1.button("🚫 Procesamiento Deshabilitado (Supera 10.000 ha)", disabled=True, use_container_width=True)
+            else:
+                if col_btn1.button("🚀 Iniciar Procesamiento de Ambientación", type="primary", use_container_width=True):
+                    st.session_state["trigger_process"] = True
+                    st.rerun()
 
             if col_btn2.button("🗑️ Descartar Lote / Volver", use_container_width=True):
                 st.session_state["current_aoi"] = None
@@ -1134,7 +1169,7 @@ def main():
                 st.rerun()
 
         # Procesamiento
-        if run_btn:
+        if run_btn and not excede_limite:
             with st.spinner("🛰️ Consultando Sentinel-2 Harmonized SR y procesando ambientación multiespectral..."):
                 try:
                     composite, n_images = get_sentinel2_composite(ee_aoi, start_date, end_date, max_cloud_pct)
@@ -1546,6 +1581,7 @@ def main():
                 - **Nivel de Procesamiento:** Nivel 2A (Reflectancia de Superficie en el fondo de la atmósfera - BOA), corregido de dispersión y absorción de aerosoles atmosféricos.
                 - **Máscara de Nubes Píxel a Píxel (SCL):** Utiliza la banda *Scene Classification Layer* para descartar automáticamente sombras de nubes (clase 3), nubes de media y alta probabilidad (clases 8 y 9), cirros finos (clase 10) y nieve (clase 11).
                 - **Reducción Temporal por Mediana:** A diferencia del promedio aritmético simple, la **mediana estadística** evalúa la serie temporal de cada píxel y toma el valor central. Esto garantiza inmunidad total a ruidos de sensor, destellos o nubosidades residuales.
+                - **Límite Operativo de Área (10.000 ha):** Para garantizar respuestas en pocos segundos y prevenir la saturación de cuotas y memoria en Google Earth Engine, la plataforma establece un umbral máximo de 10.000 hectáreas (100 km²) por lote analizado, abarcando con holgura parcelas agrícolas, estancias y potreros ganaderos extensivos.
 
                 #### 2. Suite de Índices Espectrales
                 1. **NDVI (Índice de Vegetación de Diferencia Normalizada):**
