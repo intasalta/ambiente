@@ -21,9 +21,13 @@ import re
 import xml.etree.ElementTree as ET
 import pandas as pd
 import geopandas as gpd
+import numpy as np
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon, Point
 import plotly.express as px
 import plotly.graph_objects as go
+
+# Constante de protección operativa para no saturar Google Earth Engine
+MAX_SUPERFICIE_HA = 10000.0
 
 # ---------------------------------------------------------------------------
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTILOS CSS
@@ -567,41 +571,116 @@ def vectorize_zones_to_gdf(classified_img, aoi_ee, num_zones=4):
 # ---------------------------------------------------------------------------
 # 7. GENERADOR DE PUNTOS DE MUESTREO INTELIGENTES A CAMPO
 # ---------------------------------------------------------------------------
+def sample_interior_points(geom, k=1):
+    """Obtiene k puntos interiores espaciados y representativos dentro de una geometría."""
+    if geom is None or geom.is_empty:
+        return []
+    if k <= 1:
+        return [geom.representative_point()]
+
+    minx, miny, maxx, maxy = geom.bounds
+    nx = int(np.ceil(np.sqrt(k * 25)))
+    ny = nx
+    xs = np.linspace(minx, maxx, nx)
+    ys = np.linspace(miny, maxy, ny)
+
+    # Reducción suave de bordes para evitar puntos en el límite exterior
+    span = min(maxx - minx, maxy - miny)
+    buf_dist = 0.03 * span if span > 0 else 0
+    buf = geom.buffer(-buf_dist) if buf_dist > 0 else geom
+    target = buf if (buf is not None and not buf.is_empty) else geom
+
+    candidates = []
+    for x in xs:
+        for y in ys:
+            p = Point(x, y)
+            if target.contains(p):
+                candidates.append(p)
+
+    if not candidates:
+        return [geom.representative_point()]
+
+    if len(candidates) <= k:
+        return candidates
+
+    # Selección voraz por máxima distancia entre puntos
+    selected = [candidates[len(candidates) // 2]]
+    remaining = [c for c in candidates if c != selected[0]]
+    while len(selected) < k and remaining:
+        best_cand = max(remaining, key=lambda c: min(c.distance(s) for s in selected))
+        selected.append(best_cand)
+        remaining.remove(best_cand)
+
+    return selected
+
+
 def generate_sampling_points(gdf_zones, points_per_zone=2):
-    """Genera puntos representativos interiores para cada ambiente."""
+    """Genera puntos representativos interiores para cada ambiente de manejo."""
     sampling_records = []
-    
+    points_needed = int(points_per_zone)
+
     for zone_id in sorted(gdf_zones["zone_id"].unique()):
         sub_gdf = gdf_zones[gdf_zones["zone_id"] == zone_id].sort_values("area_ha", ascending=False)
         if sub_gdf.empty:
             continue
-        
+
         zone_label = sub_gdf["nombre_zona"].iloc[0]
         color_hex = sub_gdf["color_hex"].iloc[0]
-        selected_polys = sub_gdf.head(points_per_zone)
-        
-        for p_idx, (_, row) in enumerate(selected_polys.iterrows(), start=1):
-            geom = row.geometry
-            if geom is None or geom.is_empty:
-                continue
-            
-            rep_point = geom.representative_point()
-            lat = rep_point.y
-            lon = rep_point.x
-            
-            p_id = f"Z{zone_id}_P{p_idx}"
-            sampling_records.append({
-                "id_muestreo": p_id,
-                "zona_id": zone_id,
-                "nombre_zona": zone_label,
-                "color_hex": color_hex,
-                "lat_decimal": round(lat, 6),
-                "lon_decimal": round(lon, 6),
-                "lat_sexagesimal": decimal_to_dms(lat, is_lat=True),
-                "lon_sexagesimal": decimal_to_dms(lon, is_lat=False),
-                "poligono_ha": row["area_ha"],
-                "geometry": rep_point
-            })
+        n_polys = len(sub_gdf)
+        pts_zone_count = 0
+
+        # Caso 1: Hay suficientes polígonos grandes -> 1 punto representativo por polígono
+        if n_polys >= points_needed:
+            for _, row in sub_gdf.head(points_needed).iterrows():
+                geom = row.geometry
+                pts = sample_interior_points(geom, 1)
+                for pt in pts:
+                    pts_zone_count += 1
+                    lat, lon = pt.y, pt.x
+                    p_id = f"A{zone_id}_P{pts_zone_count}"
+                    sampling_records.append({
+                        "id_muestreo": p_id,
+                        "zona_id": zone_id,
+                        "nombre_zona": zone_label,
+                        "color_hex": color_hex,
+                        "lat_decimal": round(lat, 6),
+                        "lon_decimal": round(lon, 6),
+                        "lat_sexagesimal": decimal_to_dms(lat, is_lat=True),
+                        "lon_sexagesimal": decimal_to_dms(lon, is_lat=False),
+                        "poligono_ha": row["area_ha"],
+                        "geometry": pt
+                    })
+        # Caso 2: Menos polígonos que puntos pedidos -> Repartir cupos proporcionales a la superficie
+        else:
+            total_zone_area = sub_gdf["area_ha"].sum()
+            quotas = []
+            for _, row in sub_gdf.iterrows():
+                prop = (row["area_ha"] / total_zone_area) if total_zone_area > 0 else (1.0 / n_polys)
+                q = max(1, int(round(prop * points_needed)))
+                quotas.append(q)
+
+            diff = points_needed - sum(quotas)
+            quotas[0] = max(1, quotas[0] + diff)
+
+            for (_, row), q_pts in zip(sub_gdf.iterrows(), quotas):
+                geom = row.geometry
+                pts = sample_interior_points(geom, q_pts)
+                for pt in pts:
+                    pts_zone_count += 1
+                    lat, lon = pt.y, pt.x
+                    p_id = f"A{zone_id}_P{pts_zone_count}"
+                    sampling_records.append({
+                        "id_muestreo": p_id,
+                        "zona_id": zone_id,
+                        "nombre_zona": zone_label,
+                        "color_hex": color_hex,
+                        "lat_decimal": round(lat, 6),
+                        "lon_decimal": round(lon, 6),
+                        "lat_sexagesimal": decimal_to_dms(lat, is_lat=True),
+                        "lon_sexagesimal": decimal_to_dms(lon, is_lat=False),
+                        "poligono_ha": row["area_ha"],
+                        "geometry": pt
+                    })
 
     if not sampling_records:
         return gpd.GeoDataFrame()
@@ -854,6 +933,7 @@ def main():
             "Cargar archivo de lote (.kml, .geojson, .json):",
             type=["kml", "geojson", "json"]
         )
+        st.sidebar.caption("💡 Límite operativo: hasta **10.000 ha** por parcela.")
         if uploaded_file is not None:
             file_bytes = uploaded_file.read()
             fname = uploaded_file.name.lower()
@@ -950,15 +1030,51 @@ def main():
         help="Elimina ruido de píxeles aislados para crear paños limpios adaptados a prescripciones de siembra y fertilización variable."
     )
 
-    points_per_zone = st.sidebar.slider(
-        "Puntos de Muestreo por Zona (GPS):",
-        min_value=1,
-        max_value=3,
-        value=2,
-        help="Cantidad de sitios representativos georreferenciados a generar por cada ambiente para verificar a campo."
-    )
+    # Verificación de área del lote para tope dinámico y validación de seguridad
+    ha_chk = 0.0
+    if st.session_state["current_aoi"] is not None:
+        try:
+            gdf_chk = gpd.GeoDataFrame(geometry=[st.session_state["current_aoi"]], crs="EPSG:4326").to_crs(epsg=3857)
+            ha_chk = round(gdf_chk.geometry.area.iloc[0] / 10000.0, 2)
+        except Exception:
+            pass
 
-    run_btn = st.sidebar.button("🚀 Procesar Ambientación", use_container_width=True) or st.session_state.pop("trigger_process", False)
+    # Tope dinámico agronómico según la superficie del polígono:
+    if ha_chk <= 0:
+        max_pts_allowed = 10
+        cap_note = "Hasta 10 puntos por ambiente (se adaptará al cargar o dibujar el lote)."
+    elif ha_chk < 20:
+        max_pts_allowed = 4
+        cap_note = f"Tope de {max_pts_allowed} puntos/ambiente en lotes pequeños ({ha_chk:.1f} ha) para evitar aglomeración."
+    elif ha_chk < 100:
+        max_pts_allowed = 6
+        cap_note = f"Tope de {max_pts_allowed} puntos/ambiente recomendado para {ha_chk:.1f} ha."
+    elif ha_chk < 500:
+        max_pts_allowed = 10
+        cap_note = f"Tope de {max_pts_allowed} puntos/ambiente para {ha_chk:.1f} ha."
+    else:
+        max_pts_allowed = 15
+        cap_note = f"Tope de {max_pts_allowed} puntos/ambiente para grandes extensiones ({ha_chk:,.1f} ha)."
+
+    points_per_zone = st.sidebar.number_input(
+        "Puntos de Muestreo por Ambiente (GPS):",
+        min_value=1,
+        max_value=max_pts_allowed,
+        value=min(2, max_pts_allowed),
+        step=1,
+        help="Elige con las flechas o tipea directamente el número de sitios a muestrear por cada ambiente delimitado."
+    )
+    total_pts_estimados = points_per_zone * num_zones
+    st.sidebar.caption(f"📍 **Total:** {total_pts_estimados} puntos en el lote ({points_per_zone} por cada uno de los {num_zones} ambientes).")
+    st.sidebar.caption(f"💡 *{cap_note}*")
+
+    sidebar_disabled = (ha_chk > MAX_SUPERFICIE_HA)
+
+    run_btn = st.sidebar.button(
+        "🚀 Procesar Ambientación",
+        use_container_width=True,
+        disabled=sidebar_disabled
+    ) or (st.session_state.pop("trigger_process", False) and not sidebar_disabled)
 
     if st.session_state["current_aoi"] is not None:
         if st.sidebar.button("🔄 Cambiar Lote / Nuevo Dibujo", use_container_width=True):
@@ -980,7 +1096,7 @@ def main():
     # CASO A: Aún no tenemos polígono
     if st.session_state["current_aoi"] is None and aoi_source == "✏️ Dibujar en el Mapa":
         st.markdown("### 🗺️ Paso 1: Dibuja tu parcela en el mapa interactivo")
-        st.caption("Navega por el mapa o usa la herramienta de geoposicionamiento en la barra lateral. Utiliza el icono de polígono o rectángulo (arriba a la izquierda) para trazar los límites del lote.")
+        st.caption("Navega por el mapa o usa la herramienta de geoposicionamiento en la barra lateral. Utiliza el icono de polígono o rectángulo (arriba a la izquierda) para trazar los límites del lote (límite operativo máximo: **10.000 ha**).")
 
         map_center = st.session_state["geo_pin"] if st.session_state["geo_pin"] else [-24.90, -65.48]
         map_zoom = 15 if st.session_state["geo_pin"] else 13
@@ -1033,7 +1149,7 @@ def main():
         folium.LayerControl(position="topright", collapsed=False).add_to(m_draw)
         Fullscreen().add_to(m_draw)
 
-        map_output = st_folium(m_draw, width="100%", height=530, key="draw_map")
+        map_output = st_folium(m_draw, use_container_width=True, height=530, key="draw_map")
         
         if map_output and map_output.get("last_active_drawing"):
             geom_dict = map_output["last_active_drawing"].get("geometry")
@@ -1053,15 +1169,19 @@ def main():
 
         gdf_temp = gpd.GeoDataFrame(geometry=[shapely_aoi], crs="EPSG:4326").to_crs(epsg=3857)
         lote_ha = round(gdf_temp.geometry.area.iloc[0] / 10000.0, 2)
+        excede_limite = lote_ha > MAX_SUPERFICIE_HA
 
         # Banner de Métricas Responsivas (diseño que no se desborda en pantalla)
         strategy_short = ambientacion_mode.split(":")[0].replace("🌟", "").replace("🌿", "").replace("🌾", "").replace("💧", "").replace("🎯", "").strip()
+        metric_sup_color = "color: #e63946; font-weight: bold;" if excede_limite else ""
+        metric_sup_sub = "⚠️ Excede 10.000 ha" if excede_limite else "Área de Parcela"
+
         st.markdown(f"""
         <div class="metrics-container">
             <div class="metric-pill">
                 <div class="metric-pill-label">Superficie Total</div>
-                <div class="metric-pill-value">{lote_ha} ha</div>
-                <div class="metric-pill-sub">Área de Parcela</div>
+                <div class="metric-pill-value" style="{metric_sup_color}">{lote_ha} ha</div>
+                <div class="metric-pill-sub">{metric_sup_sub}</div>
             </div>
             <div class="metric-pill">
                 <div class="metric-pill-label">Período Temporal</div>
@@ -1076,10 +1196,19 @@ def main():
             <div class="metric-pill">
                 <div class="metric-pill-label">Estrategia Aplicada</div>
                 <div class="metric-pill-value">{strategy_short}</div>
-                <div class="metric-pill-sub">{num_zones} Zonas Homogéneas</div>
+                <div class="metric-pill-sub">{num_zones} Ambientes</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        if excede_limite:
+            st.error(
+                f"⛔ **Límite de superficie superado ({lote_ha:,.2f} ha):**\n\n"
+                f"El tamaño máximo admitido por análisis es de **{int(MAX_SUPERFICIE_HA):,} hectáreas**. "
+                f"Este control de seguridad previene la saturación de cuota y tiempos de espera excesivos en Google Earth Engine, "
+                f"garantizando que la plataforma se mantenga ágil y estable para todos los usuarios.\n\n"
+                f"👉 **Recomendación:** Por favor, acota el dibujo en el mapa o divide tu archivo KML/GeoJSON en potreros o sectores menores a 10.000 ha."
+            )
 
         # Si aún no se procesó, mostrar vista previa del lote y botón de inicio
         if st.session_state["results"] is None:
@@ -1119,14 +1248,19 @@ def main():
                     "weight": 3.5
                 }
             ).add_to(m_prev)
+            minx, miny, maxx, maxy = shapely_aoi.bounds
+            m_prev.fit_bounds([[miny, minx], [maxy, maxx]])
             folium.LayerControl(position="topright", collapsed=False).add_to(m_prev)
             Fullscreen().add_to(m_prev)
-            st_folium(m_prev, width="100%", height=460, key="preview_map", returned_objects=[])
+            st_folium(m_prev, use_container_width=True, height=460, key="preview_map", returned_objects=[])
 
             col_btn1, col_btn2 = st.columns([3, 1])
-            if col_btn1.button("🚀 Iniciar Procesamiento de Ambientación", type="primary", use_container_width=True):
-                st.session_state["trigger_process"] = True
-                st.rerun()
+            if excede_limite:
+                col_btn1.button("🚫 Procesamiento Deshabilitado (Supera 10.000 ha)", disabled=True, use_container_width=True)
+            else:
+                if col_btn1.button("🚀 Iniciar Procesamiento de Ambientación", type="primary", use_container_width=True):
+                    st.session_state["trigger_process"] = True
+                    st.rerun()
 
             if col_btn2.button("🗑️ Descartar Lote / Volver", use_container_width=True):
                 st.session_state["current_aoi"] = None
@@ -1134,7 +1268,7 @@ def main():
                 st.rerun()
 
         # Procesamiento
-        if run_btn:
+        if run_btn and not excede_limite:
             with st.spinner("🛰️ Consultando Sentinel-2 Harmonized SR y procesando ambientación multiespectral..."):
                 try:
                     composite, n_images = get_sentinel2_composite(ee_aoi, start_date, end_date, max_cloud_pct)
@@ -1325,7 +1459,7 @@ def main():
                     ).add_to(m_swipe)
 
                     Fullscreen().add_to(m_swipe)
-                    st_folium(m_swipe, width="100%", height=600, key="swipe_result_map", returned_objects=[])
+                    st_folium(m_swipe, use_container_width=True, height=600, key="swipe_result_map", returned_objects=[])
 
                 # --- MODO 2: MULTICAPA ESTÁNDAR ---
                 else:
@@ -1384,7 +1518,7 @@ def main():
 
                     folium.LayerControl(position="topright", collapsed=False).add_to(m)
                     Fullscreen().add_to(m)
-                    st_folium(m, width="100%", height=600, key="main_result_map", returned_objects=[])
+                    st_folium(m, use_container_width=True, height=600, key="main_result_map", returned_objects=[])
 
             # ---------------------------------------------------------------
             # PESTAÑA 2: CURVA FENOLÓGICA TEMPORAL (ESTILO FONTAGRO)
@@ -1546,6 +1680,7 @@ def main():
                 - **Nivel de Procesamiento:** Nivel 2A (Reflectancia de Superficie en el fondo de la atmósfera - BOA), corregido de dispersión y absorción de aerosoles atmosféricos.
                 - **Máscara de Nubes Píxel a Píxel (SCL):** Utiliza la banda *Scene Classification Layer* para descartar automáticamente sombras de nubes (clase 3), nubes de media y alta probabilidad (clases 8 y 9), cirros finos (clase 10) y nieve (clase 11).
                 - **Reducción Temporal por Mediana:** A diferencia del promedio aritmético simple, la **mediana estadística** evalúa la serie temporal de cada píxel y toma el valor central. Esto garantiza inmunidad total a ruidos de sensor, destellos o nubosidades residuales.
+                - **Límite Operativo de Área (10.000 ha):** Para garantizar respuestas en pocos segundos y prevenir la saturación de cuotas y memoria en Google Earth Engine, la plataforma establece un umbral máximo de 10.000 hectáreas (100 km²) por lote analizado, abarcando con holgura parcelas agrícolas, estancias y potreros ganaderos extensivos.
 
                 #### 2. Suite de Índices Espectrales
                 1. **NDVI (Índice de Vegetación de Diferencia Normalizada):**
