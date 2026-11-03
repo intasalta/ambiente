@@ -504,7 +504,7 @@ def classify_zones_multivariate_kmeans(img_indices, aoi_ee, num_zones=4, smooth=
     reordered_metrics = {}
     for new_id, p in enumerate(sorted_profiles, start=1):
         classified = classified.where(clustered.eq(p["raw_id"]), new_id)
-        reordered_metrics[f"Zona {new_id}"] = {
+        reordered_metrics[f"Ambiente {new_id}"] = {
             "NDVI Medio": p["ndvi"],
             "NDRE Medio (Clorofila)": p["ndre"],
             "NDWI Medio (Agua/Suelo)": p["ndwi"],
@@ -540,10 +540,19 @@ def vectorize_zones_to_gdf(classified_img, aoi_ee, num_zones=4):
     gdf["zone_id"] = gdf["zone_id"].astype(int)
 
     if num_zones == 3:
-        labels_map = {1: "Zona 1 - Potencial Bajo", 2: "Zona 2 - Potencial Medio", 3: "Zona 3 - Potencial Alto"}
+        labels_map = {
+            1: "Ambiente 1 (Vigor / Actividad Baja)",
+            2: "Ambiente 2 (Vigor / Actividad Media)",
+            3: "Ambiente 3 (Vigor / Actividad Alta)"
+        }
         color_hex_map = {1: "#d73027", 2: "#fee08b", 3: "#1a9850"}
     else:
-        labels_map = {1: "Zona 1 - Potencial Bajo", 2: "Zona 2 - Potencial Medio-Bajo", 3: "Zona 3 - Potencial Medio-Alto", 4: "Zona 4 - Potencial Alto"}
+        labels_map = {
+            1: "Ambiente 1 (Vigor / Actividad Baja)",
+            2: "Ambiente 2 (Vigor / Actividad Media)",
+            3: "Ambiente 3 (Vigor / Actividad Media-Alta)",
+            4: "Ambiente 4 (Vigor / Actividad Alta)"
+        }
         color_hex_map = {1: "#d73027", 2: "#fdae61", 3: "#a6d96a", 4: "#1a9850"}
 
     gdf["nombre_zona"] = gdf["zone_id"].map(labels_map)
@@ -617,10 +626,19 @@ def calculate_temporal_phenology(aoi_ee, classified_img, start_date, end_date, m
             curr = next_d
 
         if num_zones == 3:
-            labels_map = {1: "Zona 1 - Potencial Bajo", 2: "Zona 2 - Potencial Medio", 3: "Zona 3 - Potencial Alto"}
+            labels_map = {
+                1: "Ambiente 1 (Vigor / Actividad Baja)",
+                2: "Ambiente 2 (Vigor / Actividad Media)",
+                3: "Ambiente 3 (Vigor / Actividad Alta)"
+            }
             color_hex_map = {1: "#d73027", 2: "#fee08b", 3: "#1a9850"}
         else:
-            labels_map = {1: "Zona 1 - Potencial Bajo", 2: "Zona 2 - Potencial Medio-Bajo", 3: "Zona 3 - Potencial Medio-Alto", 4: "Zona 4 - Potencial Alto"}
+            labels_map = {
+                1: "Ambiente 1 (Vigor / Actividad Baja)",
+                2: "Ambiente 2 (Vigor / Actividad Media)",
+                3: "Ambiente 3 (Vigor / Actividad Media-Alta)",
+                4: "Ambiente 4 (Vigor / Actividad Alta)"
+            }
             color_hex_map = {1: "#d73027", 2: "#fdae61", 3: "#a6d96a", 4: "#1a9850"}
 
         rows = []
@@ -651,7 +669,7 @@ def calculate_temporal_phenology(aoi_ee, classified_img, start_date, end_date, m
                         rows.append({
                             "Fecha": d_s,
                             "zone_id": z_id,
-                            "Zona": labels_map[z_id],
+                            "Ambiente": labels_map[z_id],
                             "NDVI": round(float(m_val), 3),
                             "color_hex": color_hex_map[z_id]
                         })
@@ -692,7 +710,7 @@ def generate_kml_string(gdf_polygons, gdf_points=None, parcel_name="Lote_Ambient
         ET.SubElement(poly_style, "outline").text = "1"
 
     folder_zones = ET.SubElement(document, "Folder")
-    ET.SubElement(folder_zones, "name").text = "Zonas de Manejo (Polígonos)"
+    ET.SubElement(folder_zones, "name").text = "Ambientes Homogéneos (Polígonos)"
 
     for zone_id in sorted(gdf_polygons["zone_id"].unique()):
         sub_gdf = gdf_polygons[gdf_polygons["zone_id"] == zone_id]
@@ -710,9 +728,9 @@ def generate_kml_string(gdf_polygons, gdf_points=None, parcel_name="Lote_Ambient
             ET.SubElement(placemark, "styleUrl").text = f"#style_zone_{zone_id}"
 
             ext_data = ET.SubElement(placemark, "ExtendedData")
-            d1 = ET.SubElement(ext_data, "Data", name="Zona")
+            d1 = ET.SubElement(ext_data, "Data", name="Ambiente_ID")
             ET.SubElement(d1, "value").text = str(row["zone_id"])
-            d2 = ET.SubElement(ext_data, "Data", name="Nombre")
+            d2 = ET.SubElement(ext_data, "Data", name="Ambiente_Nombre")
             ET.SubElement(d2, "value").text = str(row["nombre_zona"])
             d3 = ET.SubElement(ext_data, "Data", name="Superficie_ha")
             ET.SubElement(d3, "value").text = str(row["area_ha"])
@@ -735,7 +753,7 @@ def generate_kml_string(gdf_polygons, gdf_points=None, parcel_name="Lote_Ambient
             p_mark = ET.SubElement(folder_pts, "Placemark")
             ET.SubElement(p_mark, "name").text = f"Muestreo {pt_row['id_muestreo']} ({pt_row['nombre_zona']})"
             desc_text = (
-                f"Zona: {pt_row['nombre_zona']}\n"
+                f"Ambiente: {pt_row['nombre_zona']}\n"
                 f"Latitud Decimal: {pt_row['lat_decimal']}\n"
                 f"Longitud Decimal: {pt_row['lon_decimal']}\n"
                 f"Coordenadas Sexagesimales: {pt_row['lat_sexagesimal']}, {pt_row['lon_sexagesimal']}\n"
@@ -1218,18 +1236,18 @@ def main():
                 if res_num_zones == 3:
                     st.markdown("""
                     <div class="legend-box">
-                        <span class="legend-item"><span class="legend-color" style="background-color: #d73027;"></span>Zona 1 - Potencial Bajo</span>
-                        <span class="legend-item"><span class="legend-color" style="background-color: #fee08b;"></span>Zona 2 - Potencial Medio</span>
-                        <span class="legend-item"><span class="legend-color" style="background-color: #1a9850;"></span>Zona 3 - Potencial Alto</span>
+                        <span class="legend-item"><span class="legend-color" style="background-color: #d73027;"></span>Ambiente 1 (Vigor / Actividad Baja)</span>
+                        <span class="legend-item"><span class="legend-color" style="background-color: #fee08b;"></span>Ambiente 2 (Vigor / Actividad Media)</span>
+                        <span class="legend-item"><span class="legend-color" style="background-color: #1a9850;"></span>Ambiente 3 (Vigor / Actividad Alta)</span>
                     </div>
                     """, unsafe_allow_html=True)
                 else:
                     st.markdown("""
                     <div class="legend-box">
-                        <span class="legend-item"><span class="legend-color" style="background-color: #d73027;"></span>Zona 1 - Potencial Bajo</span>
-                        <span class="legend-item"><span class="legend-color" style="background-color: #fdae61;"></span>Zona 2 - Potencial Medio-Bajo</span>
-                        <span class="legend-item"><span class="legend-color" style="background-color: #a6d96a;"></span>Zona 3 - Potencial Medio-Alto</span>
-                        <span class="legend-item"><span class="legend-color" style="background-color: #1a9850;"></span>Zona 4 - Potencial Alto</span>
+                        <span class="legend-item"><span class="legend-color" style="background-color: #d73027;"></span>Ambiente 1 (Vigor / Actividad Baja)</span>
+                        <span class="legend-item"><span class="legend-color" style="background-color: #fdae61;"></span>Ambiente 2 (Vigor / Actividad Media)</span>
+                        <span class="legend-item"><span class="legend-color" style="background-color: #a6d96a;"></span>Ambiente 3 (Vigor / Actividad Media-Alta)</span>
+                        <span class="legend-item"><span class="legend-color" style="background-color: #1a9850;"></span>Ambiente 4 (Vigor / Actividad Alta)</span>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -1356,7 +1374,7 @@ def main():
                                 tooltip=f"Punto {pt_row['id_muestreo']} ({pt_row['nombre_zona']})",
                                 popup=(
                                     f"<b>Muestreo {pt_row['id_muestreo']}</b><br>"
-                                    f"Zona: {pt_row['nombre_zona']}<br>"
+                                    f"Ambiente: {pt_row['nombre_zona']}<br>"
                                     f"Decimal: {pt_row['lat_decimal']}, {pt_row['lon_decimal']}<br>"
                                     f"Sexagesimal: {pt_row['lat_sexagesimal']}, {pt_row['lon_sexagesimal']}"
                                 ),
@@ -1372,7 +1390,7 @@ def main():
             # PESTAÑA 2: CURVA FENOLÓGICA TEMPORAL (ESTILO FONTAGRO)
             # ---------------------------------------------------------------
             with tab_curva:
-                st.markdown("#### 📈 Evolución Fenológica Temporal por Ambiente de Manejo")
+                st.markdown("#### 📈 Evolución Fenológica Temporal por Ambiente")
                 st.caption("Esta curva muestra la dinámica y estacionalidad del vigor vegetativo (NDVI) a lo largo del tiempo para cada ambiente clasificado:")
 
                 if not df_phenology.empty:
@@ -1380,8 +1398,8 @@ def main():
                         df_phenology,
                         x="Fecha",
                         y="NDVI",
-                        color="Zona",
-                        color_discrete_map={row["Zona"]: row["color_hex"] for _, row in df_phenology.iterrows()},
+                        color="Ambiente",
+                        color_discrete_map={row["Ambiente"]: row["color_hex"] for _, row in df_phenology.iterrows()},
                         markers=True,
                         title=f"Curva Fenológica Multitemporal (Sentinel-2 SR) — {st.session_state['aoi_name']}"
                     )
@@ -1396,9 +1414,9 @@ def main():
 
                     st.info("""
                     **Interpretación de la Curva Fenológica:**
-                    - **Separación de curvas:** Cuando las líneas de cada zona se distancian marcadamente, señala el momento en el que el estrés hídrico o la limitante de suelo comenzó a impactar al cultivo.
-                    - **Pico de verdor (Peak NDVI):** Coincide habitualmente con el cierre de canopeo y período crítico de floración/llenado de grano.
-                    - **Tasas de senescencia:** Una caída rápida en la Zona Baja suele indicar maduración anticipada por falta de agua útil en el perfil.
+                    - **Separación de curvas:** Cuando las líneas de cada ambiente se distancian marcadamente, señala el momento en el que el estrés hídrico o la limitante ambiental comenzó a manifestarse.
+                    - **Pico de verdor (Peak NDVI):** Coincide con la máxima actividad biológica y densidad de cobertura foliar.
+                    - **Tasas de senescencia:** Una caída rápida en el Ambiente 1 suele indicar pérdida anticipada de verdor o menor retención de humedad en el perfil.
                     """)
                 else:
                     st.info("No se pudieron recopilar suficientes escenas limpias en subperíodos para graficar la serie temporal. Intenta ampliar el rango de fechas.")
@@ -1416,7 +1434,7 @@ def main():
                         "lat_sexagesimal", "lon_sexagesimal", "poligono_ha"
                     ]].copy()
                     table_pts.columns = [
-                        "ID Muestreo", "Zona de Manejo", "Latitud (Dec)", "Longitud (Dec)",
+                        "ID Muestreo", "Ambiente Homogéneo", "Latitud (Dec)", "Longitud (Dec)",
                         "Latitud (DMS / Sexagesimal)", "Longitud (DMS / Sexagesimal)", "Superficie Paño (ha)"
                     ]
                     st.dataframe(table_pts, use_container_width=True, hide_index=True)
@@ -1432,7 +1450,7 @@ def main():
                     st.info("No se generaron puntos de muestreo.")
 
             # ---------------------------------------------------------------
-            # PESTAÑA 4: DIAGNÓSTICO Y ESTADÍSTICAS DE ZONAS
+            # PESTAÑA 4: DIAGNÓSTICO Y ESTADÍSTICAS DE AMBIENTES
             # ---------------------------------------------------------------
             with tab_estadisticas:
                 st.markdown(f"#### 📊 Caracterización Cuantitativa — `{res_mode}`")
@@ -1455,7 +1473,7 @@ def main():
                         color="nombre_zona",
                         color_discrete_map={row["nombre_zona"]: row["color_hex"] for _, row in summary_df.iterrows()},
                         hole=0.45,
-                        title="Proporción de Superficie por Zona"
+                        title="Proporción de Superficie por Ambiente"
                     )
                     fig_pie.update_traces(textposition="inside", textinfo="percent+label")
                     fig_pie.update_layout(showlegend=False, margin=dict(t=40, b=10, l=10, r=10))
@@ -1468,21 +1486,21 @@ def main():
                         y="area_ha",
                         color="nombre_zona",
                         color_discrete_map={row["nombre_zona"]: row["color_hex"] for _, row in summary_df.iterrows()},
-                        labels={"nombre_zona": "Zona de Manejo", "area_ha": "Superficie (ha)"},
-                        title="Superficie Total por Zona de Manejo"
+                        labels={"nombre_zona": "Ambiente", "area_ha": "Superficie (ha)"},
+                        title="Superficie Total por Ambiente"
                     )
                     fig_bar.update_layout(showlegend=False, margin=dict(t=40, b=10, l=10, r=10))
                     st.plotly_chart(fig_bar, use_container_width=True)
 
                 st.markdown("##### 📋 Resumen de Parcelamiento:")
                 display_table = summary_df[["nombre_zona", "area_ha", "porcentaje"]].copy()
-                display_table.columns = ["Zona de Manejo", "Superficie (ha)", "Participación del Lote (%)"]
+                display_table.columns = ["Ambiente", "Superficie (ha)", "Participación del Lote (%)"]
                 st.dataframe(display_table, use_container_width=True, hide_index=True)
 
-                if "Multivariada" in res_mode and isinstance(metrics, dict) and "Zona 1" in metrics:
-                    st.markdown("##### 🔬 Perfil Espectral y Diagnóstico por Zona:")
+                if "Multivariada" in res_mode and isinstance(metrics, dict) and any("Ambiente" in k for k in metrics):
+                    st.markdown("##### 🔬 Perfil Espectral y Diagnóstico por Ambiente:")
                     df_profiles = pd.DataFrame.from_dict(metrics, orient="index")
-                    df_profiles.index.name = "Zona"
+                    df_profiles.index.name = "Ambiente"
                     st.dataframe(df_profiles, use_container_width=True)
                 else:
                     st.markdown("##### 🔬 Umbrales del Algoritmo:")
@@ -1544,7 +1562,7 @@ def main():
 
                 #### 3. Algoritmo de Ambientación Multivariado
                 En la estrategia **Multivariada Completa**, cada píxel se procesa como un vector tridimensional $\\mathbf{X} = [\\text{NDVI}, \\text{NDRE}, \\text{NDWI}]$. 
-                El algoritmo no supervisado **Weka K-Means** en Earth Engine agrupa los píxeles en clusters por similitud espectral. Posteriormente, la plataforma calcula el perfil medio de cada grupo y los reordena de forma ascendente para que la **Zona 1 represente el menor potencial/vigor** y la **Zona 3 o 4 el mayor potencial**.
+                El algoritmo no supervisado **Weka K-Means** en Earth Engine agrupa los píxeles en clusters por similitud espectral. Posteriormente, la plataforma calcula el perfil medio de cada grupo y los reordena de forma ascendente para que el **Ambiente 1 represente el menor nivel de vigor / actividad** y el **Ambiente 3 o 4 el mayor nivel de vigor / actividad**.
 
                 #### 4. Filtrado Espacial Morfológico (Focal Mode)
                 La resolución satelital de 10 metros suele capturar ruido local de micro-relieve o artefactos menores a escala de píxel ("efecto sal y pimienta"). 
@@ -1553,7 +1571,7 @@ def main():
 
                 #### 5. Visualización Territorial y Navegación a Campo (KML & GeoJSON)
                 El archivo `.kml` generado cumple con el estándar abierto OGC KML 2.2 y está optimizado para su uso en diversas plataformas de análisis espacial:
-                - **Google Earth Pro:** Permite visualizar el lote en 3D con sus ambientes coloreados según su potencial y localizar los puntos de muestreo como chinchetas numeradas.
+                - **Google Earth Pro:** Permite visualizar el lote en 3D con sus ambientes coloreados según su nivel de vigor / actividad y localizar los puntos de muestreo como chinchetas numeradas.
                 - **Sistemas de Información Geográfica (GIS):** Compatible nativamente con QGIS, ArcGIS y gvSIG para análisis espacial avanzado, cruce con cartas de suelos o mapas topográficos.
                 - **Dispositivos Móviles y Navegadores GPS:** Los puntos de muestreo pueden cargarse directamente en aplicaciones móviles de campo (Google Maps, OruxMaps, QField, Avenza Maps) o transferirse a receptores GPS de mano (Garmin) para guiar recorridas a campo, calicatas de suelo o muestreos de forraje.
 
