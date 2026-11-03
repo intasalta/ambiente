@@ -39,7 +39,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.markdown("""
+CSS_STYLES = """
 <style>
     /* Tipografía y encabezados principales */
     .app-header {
@@ -158,13 +158,18 @@ st.markdown("""
         text-align: center;
     }
 </style>
-""", unsafe_allow_html=True)
+"""
+
+if hasattr(st, "html"):
+    st.html(CSS_STYLES)
+else:
+    st.markdown(CSS_STYLES, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
 # 2. AUTENTICACIÓN GOOGLE EARTH ENGINE (GEE)
 # ---------------------------------------------------------------------------
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner="Conectando con Google Earth Engine...")
 def init_earth_engine():
     """Inicializa Earth Engine usando Service Account Credentials desde st.secrets."""
     try:
