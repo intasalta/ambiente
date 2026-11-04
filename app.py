@@ -886,6 +886,16 @@ def render_folium_map(folium_map, height=500):
     components.html(html_data, height=height)
 
 
+def clear_map_caches():
+    """Limpia los cachés de mapas en session_state para evitar parpadeos y desincronizaciones."""
+    st.session_state.pop("cached_prev_html", None)
+    st.session_state.pop("cached_prev_aoi", None)
+    st.session_state.pop("cached_map_m_html", None)
+    st.session_state.pop("cached_map_m_key", None)
+    st.session_state.pop("cached_swipe_html", None)
+    st.session_state.pop("cached_swipe_key", None)
+
+
 # ---------------------------------------------------------------------------
 # 10. APLICACIÓN PRINCIPAL (STREAMLIT UI)
 # ---------------------------------------------------------------------------
@@ -935,6 +945,7 @@ def main():
         st.session_state["current_aoi"] = None
         st.session_state["results"] = None
         st.session_state["aoi_name"] = "Parcela_Agricola"
+        clear_map_caches()
 
     st.session_state["last_aoi_source"] = aoi_source
 
@@ -956,7 +967,9 @@ def main():
             if err:
                 st.sidebar.error(err)
             else:
-                st.session_state["current_aoi"] = geom
+                if st.session_state.get("current_aoi") != geom:
+                    st.session_state["current_aoi"] = geom
+                    clear_map_caches()
                 st.sidebar.success(f"Lote cargado: {st.session_state['aoi_name']}")
 
     # --- Herramienta de Geoposicionamiento ---
@@ -1090,6 +1103,7 @@ def main():
         if st.sidebar.button("🔄 Cambiar Lote / Nuevo Dibujo", use_container_width=True):
             st.session_state["current_aoi"] = None
             st.session_state["results"] = None
+            clear_map_caches()
             st.rerun()
 
     # Créditos en Sidebar
@@ -1160,7 +1174,13 @@ def main():
         Fullscreen().add_to(m_draw)
 
         try:
-            map_output = st_folium(m_draw, use_container_width=True, height=530, key="draw_map")
+            map_output = st_folium(
+                m_draw,
+                use_container_width=True,
+                height=530,
+                key="draw_map",
+                returned_objects=["last_active_drawing"]
+            )
         except Exception:
             render_folium_map(m_draw, height=530)
             map_output = None
@@ -1172,6 +1192,7 @@ def main():
                 if not err:
                     st.session_state["current_aoi"] = geom
                     st.session_state["aoi_name"] = "Lote_Dibujado"
+                    clear_map_caches()
                     st.rerun()
 
     # CASO B: Ya tenemos AOI delimitado
@@ -1229,44 +1250,51 @@ def main():
             st.markdown("### 📍 Vista Previa del Lote Delimitado")
             st.info(f"Parcela: **{st.session_state['aoi_name']}** — Superficie: **{lote_ha} hectáreas**. Revisa los límites y presiona el botón para procesar la ambientación.")
 
-            # Google Satellite SIEMPRE por defecto con nombre limpio
-            m_prev = folium.Map(
-                location=[center_lat, center_lon],
-                zoom_start=15,
-                tiles=None
-            )
-            folium.TileLayer(
-                tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-                attr="Google Satellite",
-                name="Google Satélite (Alta Resolución)",
-                overlay=False,
-                control=True
-            ).add_to(m_prev)
-            # Argenmap secundaria
-            folium.TileLayer(
-                tiles="https://wms.ign.gob.ar/geoserver/gwc/service/wmts/rest/capabaseargenmap/normal/EPSG:3857/EPSG:3857:{z}/{y}/{x}?format=image/png",
-                attr="Instituto Geográfico Nacional (IGN Argentina)",
-                name="Argenmap (IGN Argentina)",
-                overlay=False,
-                control=True,
-                show=False
-            ).add_to(m_prev)
+            # Caché del HTML del mapa de vista previa para evitar parpadeos y recargas
+            # al interactuar con los controles de la barra lateral (puntos, suavizado, etc.)
+            aoi_signature = f"{shapely_aoi.wkt}_{st.session_state.get('aoi_name', '')}"
+            if st.session_state.get("cached_prev_aoi") != aoi_signature or "cached_prev_html" not in st.session_state:
+                # Google Satellite SIEMPRE por defecto con nombre limpio
+                m_prev = folium.Map(
+                    location=[center_lat, center_lon],
+                    zoom_start=15,
+                    tiles=None
+                )
+                folium.TileLayer(
+                    tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                    attr="Google Satellite",
+                    name="Google Satélite (Alta Resolución)",
+                    overlay=False,
+                    control=True
+                ).add_to(m_prev)
+                # Argenmap secundaria
+                folium.TileLayer(
+                    tiles="https://wms.ign.gob.ar/geoserver/gwc/service/wmts/rest/capabaseargenmap/normal/EPSG:3857/EPSG:3857:{z}/{y}/{x}?format=image/png",
+                    attr="Instituto Geográfico Nacional (IGN Argentina)",
+                    name="Argenmap (IGN Argentina)",
+                    overlay=False,
+                    control=True,
+                    show=False
+                ).add_to(m_prev)
 
-            folium.GeoJson(
-                mapping(shapely_aoi),
-                name="Perímetro de Parcela",
-                style_function=lambda x: {
-                    "fillColor": "#00f0ff",
-                    "fillOpacity": 0.2,
-                    "color": "#00f0ff",
-                    "weight": 3.5
-                }
-            ).add_to(m_prev)
-            minx, miny, maxx, maxy = shapely_aoi.bounds
-            m_prev.fit_bounds([[miny, minx], [maxy, maxx]])
-            folium.LayerControl(position="topright", collapsed=False).add_to(m_prev)
-            Fullscreen().add_to(m_prev)
-            render_folium_map(m_prev, height=480)
+                folium.GeoJson(
+                    mapping(shapely_aoi),
+                    name="Perímetro de Parcela",
+                    style_function=lambda x: {
+                        "fillColor": "#00f0ff",
+                        "fillOpacity": 0.2,
+                        "color": "#00f0ff",
+                        "weight": 3.5
+                    }
+                ).add_to(m_prev)
+                minx, miny, maxx, maxy = shapely_aoi.bounds
+                m_prev.fit_bounds([[miny, minx], [maxy, maxx]])
+                folium.LayerControl(position="topright", collapsed=False).add_to(m_prev)
+                Fullscreen().add_to(m_prev)
+                st.session_state["cached_prev_html"] = m_prev.get_root().render()
+                st.session_state["cached_prev_aoi"] = aoi_signature
+
+            components.html(st.session_state["cached_prev_html"], height=480)
 
             col_btn1, col_btn2 = st.columns([3, 1])
             if excede_limite:
@@ -1279,6 +1307,7 @@ def main():
             if col_btn2.button("🗑️ Descartar Lote / Volver", use_container_width=True):
                 st.session_state["current_aoi"] = None
                 st.session_state["results"] = None
+                clear_map_caches()
                 st.rerun()
 
         # Procesamiento
@@ -1428,111 +1457,121 @@ def main():
 
                     st.caption("↔️ **Mueve la barra vertical divisoria en el mapa** con el cursor para contrastar la capa izquierda y derecha en tiempo real.")
 
-                    m_swipe = folium.Map(
-                        location=[res["center_lat"], res["center_lon"]],
-                        zoom_start=15,
-                        tiles=None
-                    )
-
-                    # Construir capa izquierda
-                    if swipe_left_name == "Google Satélite":
-                        layer_left = folium.TileLayer(
-                            tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-                            attr="Google Satellite",
-                            name="Google Satélite"
+                    swipe_key = f"{id(res)}_{swipe_left_name}_{swipe_right_name}"
+                    if st.session_state.get("cached_swipe_key") != swipe_key or "cached_swipe_html" not in st.session_state:
+                        m_swipe = folium.Map(
+                            location=[res["center_lat"], res["center_lon"]],
+                            zoom_start=15,
+                            tiles=None
                         )
-                    elif swipe_left_name == "Color Natural (RGB)":
-                        layer_left = get_ee_tile_layer(composite, vis_rgb, "Color Natural RGB")
-                    elif swipe_left_name == "Falso Color CIR":
-                        layer_left = get_ee_tile_layer(composite, vis_cir, "Falso Color CIR")
-                    else:
-                        layer_left = get_ee_tile_layer(img_indices.select("NDVI"), vis_ndvi, "NDVI Continuo")
 
-                    # Construir capa derecha
-                    if swipe_right_name == "Ambientación (Zonas de Manejo)":
-                        layer_right = get_ee_tile_layer(classified, vis_zones, "Ambientación")
-                    elif swipe_right_name == "NDVI Continuo":
-                        layer_right = get_ee_tile_layer(img_indices.select("NDVI"), vis_ndvi, "NDVI Continuo")
-                    elif swipe_right_name == "NDRE (Red Edge)":
-                        layer_right = get_ee_tile_layer(img_indices.select("NDRE"), vis_ndre, "NDRE")
-                    else:
-                        layer_right = get_ee_tile_layer(img_indices.select("NDWI"), vis_ndwi, "NDWI")
+                        # Construir capa izquierda
+                        if swipe_left_name == "Google Satélite":
+                            layer_left = folium.TileLayer(
+                                tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                                attr="Google Satellite",
+                                name="Google Satélite"
+                            )
+                        elif swipe_left_name == "Color Natural (RGB)":
+                            layer_left = get_ee_tile_layer(composite, vis_rgb, "Color Natural RGB")
+                        elif swipe_left_name == "Falso Color CIR":
+                            layer_left = get_ee_tile_layer(composite, vis_cir, "Falso Color CIR")
+                        else:
+                            layer_left = get_ee_tile_layer(img_indices.select("NDVI"), vis_ndvi, "NDVI Continuo")
 
-                    layer_left.add_to(m_swipe)
-                    layer_right.add_to(m_swipe)
+                        # Construir capa derecha
+                        if swipe_right_name == "Ambientación (Zonas de Manejo)":
+                            layer_right = get_ee_tile_layer(classified, vis_zones, "Ambientación")
+                        elif swipe_right_name == "NDVI Continuo":
+                            layer_right = get_ee_tile_layer(img_indices.select("NDVI"), vis_ndvi, "NDVI Continuo")
+                        elif swipe_right_name == "NDRE (Red Edge)":
+                            layer_right = get_ee_tile_layer(img_indices.select("NDRE"), vis_ndre, "NDRE")
+                        else:
+                            layer_right = get_ee_tile_layer(img_indices.select("NDWI"), vis_ndwi, "NDWI")
 
-                    # Plugin Side by Side (Swipe)
-                    sbs = SideBySideLayers(layer_left=layer_left, layer_right=layer_right)
-                    sbs.add_to(m_swipe)
+                        layer_left.add_to(m_swipe)
+                        layer_right.add_to(m_swipe)
 
-                    # Contorno de Parcela
-                    folium.GeoJson(
-                        mapping(shapely_aoi),
-                        name="Perímetro de Parcela (AOI)",
-                        style_function=lambda x: {"fillColor": "transparent", "color": "#00f0ff", "weight": 3.5, "dashArray": "6, 6"}
-                    ).add_to(m_swipe)
+                        # Plugin Side by Side (Swipe)
+                        sbs = SideBySideLayers(layer_left=layer_left, layer_right=layer_right)
+                        sbs.add_to(m_swipe)
 
-                    Fullscreen().add_to(m_swipe)
-                    render_folium_map(m_swipe, height=620)
+                        # Contorno de Parcela
+                        folium.GeoJson(
+                            mapping(shapely_aoi),
+                            name="Perímetro de Parcela (AOI)",
+                            style_function=lambda x: {"fillColor": "transparent", "color": "#00f0ff", "weight": 3.5, "dashArray": "6, 6"}
+                        ).add_to(m_swipe)
+
+                        Fullscreen().add_to(m_swipe)
+                        st.session_state["cached_swipe_html"] = m_swipe.get_root().render()
+                        st.session_state["cached_swipe_key"] = swipe_key
+
+                    components.html(st.session_state["cached_swipe_html"], height=620)
 
                 # --- MODO 2: MULTICAPA ESTÁNDAR ---
                 else:
                     st.caption("Usa el menú de capas (arriba a la derecha) para alternar entre Argenmap, Google Satélite, Ambientación, Puntos de Muestreo e Índices.")
 
-                    m = folium.Map(
-                        location=[res["center_lat"], res["center_lon"]],
-                        zoom_start=15,
-                        tiles=None
-                    )
-                    folium.TileLayer(
-                        tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-                        attr="Google Satellite",
-                        name="Google Satélite (Alta Resolución)",
-                        overlay=False,
-                        control=True
-                    ).add_to(m)
+                    m_key = f"{id(res)}_{res_num_zones}_{len(gdf_points)}"
+                    if st.session_state.get("cached_map_m_key") != m_key or "cached_map_m_html" not in st.session_state:
+                        m = folium.Map(
+                            location=[res["center_lat"], res["center_lon"]],
+                            zoom_start=15,
+                            tiles=None
+                        )
+                        folium.TileLayer(
+                            tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                            attr="Google Satellite",
+                            name="Google Satélite (Alta Resolución)",
+                            overlay=False,
+                            control=True
+                        ).add_to(m)
 
-                    folium.TileLayer(
-                        tiles="https://wms.ign.gob.ar/geoserver/gwc/service/wmts/rest/capabaseargenmap/normal/EPSG:3857/EPSG:3857:{z}/{y}/{x}?format=image/png",
-                        attr="Instituto Geográfico Nacional (IGN Argentina)",
-                        name="Argenmap (IGN Argentina)",
-                        overlay=False,
-                        control=True,
-                        show=False
-                    ).add_to(m)
+                        folium.TileLayer(
+                            tiles="https://wms.ign.gob.ar/geoserver/gwc/service/wmts/rest/capabaseargenmap/normal/EPSG:3857/EPSG:3857:{z}/{y}/{x}?format=image/png",
+                            attr="Instituto Geográfico Nacional (IGN Argentina)",
+                            name="Argenmap (IGN Argentina)",
+                            overlay=False,
+                            control=True,
+                            show=False
+                        ).add_to(m)
 
-                    add_ee_layer_to_map(m, classified, vis_zones, f"🌾 Ambientación ({res_num_zones} Zonas)", shown=True)
-                    add_ee_layer_to_map(m, img_indices.select("NDVI"), vis_ndvi, "🌿 Índice NDVI (Biomasa)", shown=False)
-                    add_ee_layer_to_map(m, img_indices.select("NDRE"), vis_ndre, "🌾 Índice NDRE (Clorofila Red Edge)", shown=False)
-                    add_ee_layer_to_map(m, img_indices.select("NDWI"), vis_ndwi, "💧 Índice NDWI (Humedad SWIR)", shown=False)
-                    add_ee_layer_to_map(m, composite, vis_rgb, "🌈 Sentinel-2: Color Natural (RGB)", shown=False)
-                    add_ee_layer_to_map(m, composite, vis_cir, "🔴 Sentinel-2: Falso Color CIR", shown=False)
+                        add_ee_layer_to_map(m, classified, vis_zones, f"🌾 Ambientación ({res_num_zones} Zonas)", shown=True)
+                        add_ee_layer_to_map(m, img_indices.select("NDVI"), vis_ndvi, "🌿 Índice NDVI (Biomasa)", shown=False)
+                        add_ee_layer_to_map(m, img_indices.select("NDRE"), vis_ndre, "🌾 Índice NDRE (Clorofila Red Edge)", shown=False)
+                        add_ee_layer_to_map(m, img_indices.select("NDWI"), vis_ndwi, "💧 Índice NDWI (Humedad SWIR)", shown=False)
+                        add_ee_layer_to_map(m, composite, vis_rgb, "🌈 Sentinel-2: Color Natural (RGB)", shown=False)
+                        add_ee_layer_to_map(m, composite, vis_cir, "🔴 Sentinel-2: Falso Color CIR", shown=False)
 
-                    folium.GeoJson(
-                        mapping(shapely_aoi),
-                        name="Perímetro de Parcela (AOI)",
-                        style_function=lambda x: {"fillColor": "transparent", "color": "#00f0ff", "weight": 3.5, "dashArray": "6, 6"}
-                    ).add_to(m)
+                        folium.GeoJson(
+                            mapping(shapely_aoi),
+                            name="Perímetro de Parcela (AOI)",
+                            style_function=lambda x: {"fillColor": "transparent", "color": "#00f0ff", "weight": 3.5, "dashArray": "6, 6"}
+                        ).add_to(m)
 
-                    if not gdf_points.empty:
-                        pts_group = folium.FeatureGroup(name="📍 Puntos de Muestreo a Campo", show=True)
-                        for _, pt_row in gdf_points.iterrows():
-                            folium.Marker(
-                                [pt_row["lat_decimal"], pt_row["lon_decimal"]],
-                                tooltip=f"Punto {pt_row['id_muestreo']} ({pt_row['nombre_zona']})",
-                                popup=(
-                                    f"<b>Muestreo {pt_row['id_muestreo']}</b><br>"
-                                    f"Ambiente: {pt_row['nombre_zona']}<br>"
-                                    f"Decimal: {pt_row['lat_decimal']}, {pt_row['lon_decimal']}<br>"
-                                    f"Sexagesimal: {pt_row['lat_sexagesimal']}, {pt_row['lon_sexagesimal']}"
-                                ),
-                                icon=folium.Icon(color="darkblue", icon="flag", prefix="fa")
-                            ).add_to(pts_group)
-                        pts_group.add_to(m)
+                        if not gdf_points.empty:
+                            pts_group = folium.FeatureGroup(name="📍 Puntos de Muestreo a Campo", show=True)
+                            for _, pt_row in gdf_points.iterrows():
+                                folium.Marker(
+                                    [pt_row["lat_decimal"], pt_row["lon_decimal"]],
+                                    tooltip=f"Punto {pt_row['id_muestreo']} ({pt_row['nombre_zona']})",
+                                    popup=(
+                                        f"<b>Muestreo {pt_row['id_muestreo']}</b><br>"
+                                        f"Ambiente: {pt_row['nombre_zona']}<br>"
+                                        f"Decimal: {pt_row['lat_decimal']}, {pt_row['lon_decimal']}<br>"
+                                        f"Sexagesimal: {pt_row['lat_sexagesimal']}, {pt_row['lon_sexagesimal']}"
+                                    ),
+                                    icon=folium.Icon(color="darkblue", icon="flag", prefix="fa")
+                                ).add_to(pts_group)
+                            pts_group.add_to(m)
 
-                    folium.LayerControl(position="topright", collapsed=False).add_to(m)
-                    Fullscreen().add_to(m)
-                    render_folium_map(m, height=620)
+                        folium.LayerControl(position="topright", collapsed=False).add_to(m)
+                        Fullscreen().add_to(m)
+                        st.session_state["cached_map_m_html"] = m.get_root().render()
+                        st.session_state["cached_map_m_key"] = m_key
+
+                    components.html(st.session_state["cached_map_m_html"], height=620)
 
             # ---------------------------------------------------------------
             # PESTAÑA 2: CURVA FENOLÓGICA TEMPORAL (ESTILO FONTAGRO)
