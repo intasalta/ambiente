@@ -10,6 +10,7 @@
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import ee
 import folium
 from streamlit_folium import st_folium
@@ -879,6 +880,12 @@ def get_ee_tile_layer(ee_image_object, vis_params, name, shown=True):
     )
 
 
+def render_folium_map(folium_map, height=500):
+    """Renderiza el mapa de Folium de forma nativa como HTML autocontenido (inmune a latencias o caídas de WebSockets)."""
+    html_data = folium_map.get_root().render()
+    components.html(html_data, height=height)
+
+
 # ---------------------------------------------------------------------------
 # 10. APLICACIÓN PRINCIPAL (STREAMLIT UI)
 # ---------------------------------------------------------------------------
@@ -928,8 +935,6 @@ def main():
         st.session_state["current_aoi"] = None
         st.session_state["results"] = None
         st.session_state["aoi_name"] = "Parcela_Agricola"
-        st.session_state["last_aoi_source"] = aoi_source
-        st.rerun()
 
     st.session_state["last_aoi_source"] = aoi_source
 
@@ -1154,7 +1159,11 @@ def main():
         folium.LayerControl(position="topright", collapsed=False).add_to(m_draw)
         Fullscreen().add_to(m_draw)
 
-        map_output = st_folium(m_draw, use_container_width=True, height=530, key="draw_map")
+        try:
+            map_output = st_folium(m_draw, use_container_width=True, height=530, key="draw_map")
+        except Exception:
+            render_folium_map(m_draw, height=530)
+            map_output = None
         
         if map_output and map_output.get("last_active_drawing"):
             geom_dict = map_output["last_active_drawing"].get("geometry")
@@ -1257,7 +1266,7 @@ def main():
             m_prev.fit_bounds([[miny, minx], [maxy, maxx]])
             folium.LayerControl(position="topright", collapsed=False).add_to(m_prev)
             Fullscreen().add_to(m_prev)
-            st_folium(m_prev, use_container_width=True, height=460, key="preview_map", returned_objects=[])
+            render_folium_map(m_prev, height=480)
 
             col_btn1, col_btn2 = st.columns([3, 1])
             if excede_limite:
@@ -1464,7 +1473,7 @@ def main():
                     ).add_to(m_swipe)
 
                     Fullscreen().add_to(m_swipe)
-                    st_folium(m_swipe, use_container_width=True, height=600, key="swipe_result_map", returned_objects=[])
+                    render_folium_map(m_swipe, height=620)
 
                 # --- MODO 2: MULTICAPA ESTÁNDAR ---
                 else:
@@ -1523,7 +1532,7 @@ def main():
 
                     folium.LayerControl(position="topright", collapsed=False).add_to(m)
                     Fullscreen().add_to(m)
-                    st_folium(m, use_container_width=True, height=600, key="main_result_map", returned_objects=[])
+                    render_folium_map(m, height=620)
 
             # ---------------------------------------------------------------
             # PESTAÑA 2: CURVA FENOLÓGICA TEMPORAL (ESTILO FONTAGRO)

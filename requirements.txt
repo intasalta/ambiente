@@ -1,11 +1,13 @@
-streamlit==1.32.0
-streamlit-folium==0.17.1
-folium==0.15.1
-earthengine-api>=0.1.390
-geopandas==0.14.3
-shapely==2.0.3
-pyarrow>=14.0.1,<16.0.0
+# Dependencias estables verificadas en producción (INTA AMBIENTE)
+streamlit==1.52.2
+streamlit-folium==0.25.3
+folium==0.20.0
+earthengine-api>=1.7.34
+geopandas==1.1.4
+shapely==2.1.2
+pyarrow>=14.0.0,<25.0.0
 plotly>=5.18.0
 pandas>=2.0.0
 numpy>=1.24.0
+pyogrio>=0.7.0
 requests>=2.31.0
