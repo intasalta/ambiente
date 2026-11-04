@@ -897,7 +897,183 @@ def clear_map_caches():
 
 
 # ---------------------------------------------------------------------------
-# 10. APLICACIÓN PRINCIPAL (STREAMLIT UI)
+# 10. MANUAL DE USUARIO Y METODOLOGÍA CIENTÍFICA
+# ---------------------------------------------------------------------------
+def render_manual_content():
+    """Renderiza la guía paso a paso, marco metodológico y fundamentos científicos."""
+    man_tab1, man_tab2, man_tab3 = st.tabs([
+        "📋 Guía Paso a Paso de Operación",
+        "🔬 Marco Metodológico y Algoritmos",
+        "🏛️ Créditos Institucionales"
+    ])
+
+    with man_tab1:
+        st.markdown(r"""
+        ### 📋 Guía Operativa Paso a Paso: ¿Cómo utilizar la plataforma?
+
+        Esta guía describe el flujo de trabajo estándar para ambientar parcelas agrícolas o ganaderas, extraer puntos de muestreo y generar prescripciones operativas:
+
+        ---
+        #### 1️⃣ Paso 1: Delimitación del Lote (Área de Interés - AOI)
+        - **Opción A (Dibujar en el mapa interactivo):** 
+          - Utiliza las herramientas de dibujo ubicadas en la esquina superior izquierda del mapa (icono de **Polígono** o **Rectángulo**).
+          - Haz clic en los vértices del potrero y haz doble clic sobre el último punto para cerrar el polígono.
+          - *Geoposicionamiento Rápido:* En la barra lateral dispones del módulo desplegable **📍 Geoposicionar / Ir a Coordenadas**. Puedes ingresar coordenadas en formato **Decimal** (ej: `-24.9015, -65.4820`) o **Sexagesimal DMS** (ej: `24° 54' 05" S, 65° 28' 55" O`) y presionar el botón correspondiente para centrar el mapa automáticamente sobre tu campo antes de trazarlo.
+        - **Opción B (Subir archivo vectorial existente):**
+          - Selecciona la opción **📁 Subir KML / GeoJSON** en la barra lateral y arrastra tu archivo `.kml`, `.kmz`, `.geojson` o `.json`. La plataforma extraerá la geometría y centrará la vista de inmediato.
+        - **Límite Operativo de Seguridad (10.000 ha):**
+          - La plataforma admite parcelas de hasta **10.000 hectáreas** (100 km²) por análisis. Si se supera este valor, el sistema advertirá al usuario para que acote la geometría o la divida en potreros menores, asegurando respuestas ágiles y evitando saturar cuotas en Google Earth Engine.
+
+        ---
+        #### 2️⃣ Paso 2: Filtro Temporal Sentinel-2 y Nubes
+        - **Rango de Fechas (Inicio y Fin):**
+          - Por defecto se sugiere un intervalo de 90 días hacia atrás desde la fecha actual.
+          - Se recomienda seleccionar una ventana temporal de **60 a 90 días** coincidente con el período crítico del cultivo (ej: floración / llenado de granos en cultivos de grano) o la época de máxima actividad forrajera en pasturas y pastizales naturales.
+        - **Cobertura Máxima de Nubes (%):**
+          - Permite descartar escenas con nubosidad general elevada (por defecto 15%).
+          - Además, la plataforma aplica la máscara píxel a píxel **Scene Classification Layer (SCL)** provista por la ESA a 10-20 m, descartando sombras, cirros y nubes residuales de cada imagen.
+        - **Composición Multitemporal por Mediana:**
+          - Todos los píxeles despejados dentro de la ventana de fechas se integran mediante la **mediana estadística**, eliminando cualquier distorsión por destellos o anomalías atmosféricas puntuales.
+
+        ---
+        #### 3️⃣ Paso 3: Estrategia Agronómica y Criterio de Segmentación
+        - **Criterio de Segmentación:**
+          - **🌟 Multivariada Completa (NDVI + NDRE + NDWI):** Integra en simultáneo biomasa foliar, clorofila y contenido hídrico/humedad de suelo en un espacio tridimensional mediado por K-Means. Es la opción recomendada para ambientaciones de alta precisión.
+          - **🌿 Monovariables (NDVI, NDRE, NDWI o ICA):** Para análisis orientados a una variable específica.
+        - **Algoritmo para opciones Monovariables:**
+          - *📊 Cuantiles Agronómicos (Percentiles):* Divide el lote en áreas de **superficie equivalente** (terciles al 33% o cuartiles al 25%).
+          - *🤖 Weka K-Means (Clustering GEE):* Agrupa por **afinidad radiométrica natural** respetando la extensión real de los quiebres o limitantes del lote.
+        - **Cantidad de Zonas de Manejo (3 o 4):**
+          - *3 Zonas:* Ambiente 1 (Baja), Ambiente 2 (Media), Ambiente 3 (Alta).
+          - *4 Zonas:* Ambiente 1 (Baja), Ambiente 2 (Media), Ambiente 3 (Media-Alta), Ambiente 4 (Alta).
+        - **Aplicar Suavizado Espacial (Focal Mode 10m):**
+          - Recomendado mantener activado. Reemplaza píxeles aislados por la moda predominante de su entorno, transformando mapas pixelados en **paños continuos y limpios**, listos para maquinaria agrícola y dosificación variable de insumos.
+
+        ---
+        #### 4️⃣ Paso 4: Puntos de Muestreo a Campo (GPS)
+        - **Selección de Puntos por Ambiente:**
+          - Define con el selector cuántos sitios de control deseas relevar dentro de cada zona (de 1 a 15, con tope dinámico adaptado al tamaño del potrero).
+          - El sistema distribuye los puntos en el **interior de los polígonos representativos** maximizando la distancia euclidiana entre ellos para evitar aglomeraciones.
+
+        ---
+        #### 5️⃣ Paso 5: Procesamiento y Exploración Visual
+        - Presiona **🚀 Iniciar Procesamiento de Ambientación** (o desde la barra lateral).
+        - **Pestaña 🗺️ Visualizador Espacial:**
+          - *Modo Multicapa Estándar:* Enciende o apaga capas temáticas (Google Satélite, Argenmap IGN, Ambientes, Puntos de Muestreo, NDVI, NDRE, NDWI, RGB y CIR) desde el selector de capas superior derecho.
+          - *Modo Cortina Deslizante (SWIPE):* Compara interactivamente dos capas deslizando la barra vertical divisoria sobre el mapa (ej: Satélite de fondo vs Ambientación resultante).
+        - **Pestaña 📈 Curva Fenológica Temporal:**
+          - Analiza la serie de tiempo multitemporal del NDVI para cada uno de los ambientes clasificados, evaluando la estacionalidad y estabilidad productiva interanual o del ciclo del cultivo.
+        - **Pestaña 📍 Puntos de Muestreo (GPS):**
+          - Tabla detallada con cada punto identificado por ambiente (`A1_P1`, `A2_P1`, etc.), superficie del paño y coordenadas en formato **Decimal** y **Sexagesimal (DMS)**.
+        - **Pestaña 📊 Diagnóstico y Estadísticas:**
+          - Desglose de superficie en hectáreas y porcentaje ocupado por cada ambiente, junto a sus valores promedios espectrales.
+
+        ---
+        #### 6️⃣ Paso 6: Exportación de Archivos para Campo y SIG
+        - **💾 Descargar KML OGC:** Archivo estructurado con polígonos coloreados translúcidos y Waypoints con fichas descriptivas completas, listo para abrir en **Google Earth Pro**, cargar en navegadores **GPS Garmin** o visualizar en aplicaciones móviles de campo (**OruxMaps**, **QField**, **Avenza Maps**, **Google Maps**).
+        - **💾 Descargar GeoJSON:** Capa vectorial con atributos alfanuméricos estandarizados para análisis en **QGIS**, **ArcGIS** o scripts de geoprocesamiento.
+        - **💾 Descargar CSV de Puntos GPS:** Planilla tabular para importar a Excel, diseñar planillas de calicatas o guiar muestreadores de suelo y biomasa.
+        """)
+
+    with man_tab2:
+        st.markdown(r"""
+        ### 🔬 Marco Metodológico y Fundamentos Teóricos
+
+        #### 1. Fuentes Satelitales y Calibración Radiométrica
+        **INTA AMBIENTE** procesa la constelación **Sentinel-2A y Sentinel-2B** de la Agencia Espacial Europea (ESA), a través de la colección **`COPERNICUS/S2_SR_HARMONIZED`** en Google Earth Engine:
+        - **Resolución Espacial:** 10 metros nativos en el visible e Infrarrojo Cercano (NIR); 20 metros en Red Edge e Infrarrojo de Onda Corta (SWIR), remuestreados internamente a 10 metros para máxima compatibilidad geométrica.
+        - **Nivel de Procesamiento:** Nivel 2A (Reflectancia de Superficie en el fondo de la atmósfera - BOA), corregido de aerosoles atmosféricos.
+        - **Máscara de Nubes Píxel a Píxel (SCL):** Descarta automáticamente sombras de nubes (clase 3), nubes de media y alta probabilidad (clases 8 y 9), cirros finos (clase 10) y nieve (clase 11).
+        - **Reducción Temporal por Mediana:** Evalúa el vector temporal de cada píxel despejado y toma el valor mediano, garantizando total inmunidad frente a destellos de suelo, sombras temporales o nubosidades dispersas.
+
+        ---
+        #### 2. Suite de Índices Espectrales Agronómicos
+        1. **NDVI (Índice de Vegetación de Diferencia Normalizada):**
+           $$\text{NDVI} = \frac{\text{B8 (NIR)} - \text{B4 (Rojo)}}{\text{B8 (NIR)} + \text{B4 (Rojo)}}$$
+           Estima el vigor verde, cobertura vegetal y densidad foliar activa.
+        2. **NDRE (Índice de Borde Rojo de Diferencia Normalizada):**
+           $$\text{NDRE} = \frac{\text{B8 (NIR)} - \text{B5 (RedEdge 1)}}{\text{B8 (NIR)} + \text{B5 (RedEdge 1)}}$$
+           La radiación del Borde Rojo penetra en profundidad dentro de canopeos vegetales densos sin saturarse como el NDVI, siendo el mejor estimador de concentración de **clorofila foliar y nutrición nitrogenada**.
+        3. **NDWI (Índice de Agua de Diferencia Normalizada con SWIR):**
+           $$\text{NDWI} = \frac{\text{B8 (NIR)} - \text{B11 (SWIR 1)}}{\text{B8 (NIR)} + \text{B11 (SWIR 1)}}$$
+           Sensible al contenido de agua en tejidos vegetales y a la humedad del suelo. Permite discriminar sectores con buena retención hídrica de zonas con limitantes edáficas de profundidad, tosca o arenas.
+        4. **ICA (Índice Compuesto Integrado 40/35/25):**
+           $$\text{ICA} = 0.40 \cdot \text{NDVI} + 0.35 \cdot \text{NDRE} + 0.25 \cdot \text{NDWI}$$
+           Sintetiza en un único valor ponderado la cobertura foliar, la actividad fotosintética y el estado hídrico.
+
+        ---
+        #### 3. Algoritmo de Ambientación Multivariado
+        En la estrategia **Multivariada Completa**, cada píxel se procesa como un vector tridimensional:
+        $$\mathbf{X} = [\text{NDVI}, \text{NDRE}, \text{NDWI}]$$
+        El algoritmo **Weka K-Means** en Earth Engine agrupa los píxeles en clusters minimizando la varianza cuadrática intra-cluster en el espacio tridimensional. Posteriormente, la plataforma calcula el perfil medio de cada grupo y los reordena de forma ascendente para que el **Ambiente 1 represente el menor nivel de vigor / actividad** y el **Ambiente 3 o 4 el mayor nivel de vigor / actividad**.
+
+        ---
+        #### 4. 🔀 Clasificación Monovariable: ¿Cuantiles Agronómicos o Weka K-Means?
+        Cuando se selecciona una estrategia **Monovariable** (basada en un único índice como NDVI, NDRE, NDWI o ICA), la plataforma permite elegir entre dos metodologías matemáticas de segmentación:
+
+        ##### A) 📊 Cuantiles Agronómicos (Percentiles)
+        - **Principio Matemático:** Segmenta el histograma de frecuencias de los valores del índice en intervalos que abarcan **exactamente la misma proporción de superficie o píxeles**:
+          - Para **3 Zonas:** Percentiles 33% y 66% (Terciles). Cada ambiente agrupará aproximadamente un tercio (33,3%) de la superficie del lote.
+          - Para **4 Zonas:** Percentiles 25%, 50% y 75% (Cuartiles). Cada ambiente agrupará aproximadamente un cuarto (25%) de la superficie del lote.
+        - **Significado Agronómico:**
+          - Realiza una clasificación **estrictamente relativa** dentro de la parcela.
+          - El Ambiente 1 siempre corresponderá al 25% o 33% inferior de ese lote específico, sin importar si el lote en general tiene un nivel de vigor alto o bajo.
+        - **¿Cuándo utilizarlo?**
+          - Cuando se busca **equilibrio de superficie** para la gestión logística (ej: dividir un potrero en partes iguales para rotaciones de pastoreo o compras homogéneas de semillas y fertilizantes).
+          - Para muestreos a campo con igual esfuerzo de muestreo por estrato de superficie.
+
+        ##### B) 🤖 Weka K-Means (Clustering GEE)
+        - **Principio Matemático:** Algoritmo no supervisado de *Machine Learning* que localiza centroides en el espacio radiométrico unidimensional, agrupando los píxeles según su cercanía matemática natural, **sin imponer ningún porcentaje de superficie obligatorio**.
+        - **Significado Agronómico:**
+          - Identifica **quiebres y discontinuidades espaciales reales** en el terreno.
+          - Si en el potrero existe una limitante severa (ej: un bajo salino, un sector anegable, un manto rocoso o un manchón de erosión) que abarca únicamente el **8% o el 14% del área**, K-Means creará un ambiente propio para ese sector con su dimensión real exacta. Por el contrario, los cuantiles forzarían a ese sector a mezclarse con sectores mejores para completar obligatoriamente el 25% o 33%.
+        - **¿Cuándo utilizarlo?**
+          - Cuando el objetivo es la **detección precisa de limitantes edáficas, fallas de implantación o manchones asimétricos**.
+          - Para prescripciones variables donde los ambientes tienen dimensiones naturalmente desiguales.
+
+        ---
+        #### 5. Filtrado Espacial Morfológico (Focal Mode 10m)
+        La resolución nativa de 10 m suele registrar píxeles individuales anómalos por micro-relieve o artefactos menores ("efecto sal y pimienta"). 
+        El filtro morfológico modal reemplaza los píxeles aislados por la clase predominante de su entorno inmediato. Esto genera **unidades de paisaje continuas, estables y operativas**, facilitando el tránsito de maquinaria y la demarcación de alambrados o lotes de manejo.
+
+        ---
+        #### 6. Algoritmo de Muestreo Interior Voraz (Greedy Distance)
+        Para cada polígono de ambiente delimitado:
+        1. Se genera una grilla interna de puntos candidatos filtrada estrictamente por contención geométrica interior (`target.contains(Point)`).
+        2. Se aplica una selección voraz (*greedy selection*) que maximiza la distancia euclidiana mínima respecto a los puntos ya seleccionados:
+           $$P_{i} = \arg\max_{c \in \text{Candidatos}} \left( \min_{s \in \text{Seleccionados}} d(c, s) \right)$$
+        3. Esto asegura que los puntos de control estén representativamente esparcidos por el potrero y nunca caigan en bordes, callejones o zonas de transición.
+        """)
+
+    with man_tab3:
+        st.markdown(r"""
+        ### 🏛️ Créditos Institucionales y Equipo de Desarrollo
+
+        - **Diseño Metodológico y Desarrollo de Software:**  
+          👨‍💻 **Lic. Inf. Hernan Elena**  
+          *Grupo de Recursos Naturales (RRNN)*  
+          **Instituto Nacional de Tecnología Agropecuaria (INTA)**  
+          *Estación Experimental Agropecuaria Salta (EEA Salta)*  
+
+        - **Programa Institucional:**  
+          🌿 **Proyecto PATCHACO** (Planificación Agroecológica Territorial del Chaco y Áreas de Influencia)
+
+        - **Pila Tecnológica:**  
+          Python 3, Streamlit, Google Earth Engine API (`earthengine-api`), Folium, GeoPandas, Shapely, Plotly, Argenmap (Instituto Geográfico Nacional - IGN Argentina).
+
+        - **Uso y Citación:**  
+          Plataforma abierta y pública orientada a productores, asesores técnicos, investigadores y extensionistas para el manejo por ambientes y la intensificación ecológica de los recursos naturales.
+        """)
+
+
+@st.dialog("📖 Manual de Usuario y Metodología Científica", width="large")
+def show_manual_dialog():
+    """Diálogo emergente (popup modal) con el manual y la metodología."""
+    render_manual_content()
+
+
+# ---------------------------------------------------------------------------
+# 11. APLICACIÓN PRINCIPAL (STREAMLIT UI)
 # ---------------------------------------------------------------------------
 def main():
     # Encabezado institucional limpio (el logo permanece en la barra lateral)
@@ -1105,6 +1281,11 @@ def main():
             st.session_state["results"] = None
             clear_map_caches()
             st.rerun()
+
+    # Separador y botón de acceso al Manual de Usuario y Metodología en Diálogo Emergente (Popup)
+    st.sidebar.markdown("---")
+    if st.sidebar.button("📖 Manual y Metodología", use_container_width=True, help="Abre la guía paso a paso y los fundamentos científicos en un diálogo emergente"):
+        show_manual_dialog()
 
     # Créditos en Sidebar
     st.sidebar.markdown("---")
@@ -1725,51 +1906,7 @@ def main():
             # PESTAÑA 6: MANUAL DE USUARIO Y METODOLOGÍA CIENTÍFICA
             # ---------------------------------------------------------------
             with tab_manual:
-                st.markdown("### 📖 Manual de Usuario y Metodología Científica")
-                st.markdown("""
-                #### 1. Marco Metodológico y Fuentes Satelitales
-                **INTA AMBIENTE** utiliza la constelación de satélites **Sentinel-2A y Sentinel-2B** de la Agencia Espacial Europea (ESA), a través de la colección **`COPERNICUS/S2_SR_HARMONIZED`** en Google Earth Engine:
-                - **Resolución Espacial:** 10 metros nativos en el visible e Infrarrojo Cercano (NIR); 20 metros en Red Edge e Infrarrojo de Onda Corta (SWIR), remuestreados internamente a 10 metros.
-                - **Nivel de Procesamiento:** Nivel 2A (Reflectancia de Superficie en el fondo de la atmósfera - BOA), corregido de dispersión y absorción de aerosoles atmosféricos.
-                - **Máscara de Nubes Píxel a Píxel (SCL):** Utiliza la banda *Scene Classification Layer* para descartar automáticamente sombras de nubes (clase 3), nubes de media y alta probabilidad (clases 8 y 9), cirros finos (clase 10) y nieve (clase 11).
-                - **Reducción Temporal por Mediana:** A diferencia del promedio aritmético simple, la **mediana estadística** evalúa la serie temporal de cada píxel y toma el valor central. Esto garantiza inmunidad total a ruidos de sensor, destellos o nubosidades residuales.
-                - **Límite Operativo de Área (10.000 ha):** Para garantizar respuestas en pocos segundos y prevenir la saturación de cuotas y memoria en Google Earth Engine, la plataforma establece un umbral máximo de 10.000 hectáreas (100 km²) por lote analizado, abarcando con holgura parcelas agrícolas, estancias y potreros ganaderos extensivos.
-
-                #### 2. Suite de Índices Espectrales
-                1. **NDVI (Índice de Vegetación de Diferencia Normalizada):**
-                   $$\\text{NDVI} = \\frac{\\text{B8 (NIR)} - \\text{B4 (Rojo)}}{\\text{B8 (NIR)} + \\text{B4 (Rojo)}}$$
-                   Estima la densidad foliar, cobertura vegetal y vigor verde general de la vegetación.
-                2. **NDRE (Índice de Borde Rojo de Diferencia Normalizada):**
-                   $$\\text{NDRE} = \\frac{\\text{B8 (NIR)} - \\text{B5 (RedEdge 1)}}{\\text{B8 (NIR)} + \\text{B5 (RedEdge 1)}}$$
-                   La radiación del Borde Rojo penetra en profundidad dentro de canopeos vegetales densos sin sufrir el efecto de saturación que afecta al NDVI, siendo el mejor estimador de concentración de **clorofila foliar y estado nutricional**.
-                3. **NDWI / NDII (Índice de Humedad de Diferencia Normalizada con SWIR):**
-                   $$\\text{NDWI} = \\frac{\\text{B8 (NIR)} - \\text{B11 (SWIR 1)}}{\\text{B8 (NIR)} + \\text{B11 (SWIR 1)}}$$
-                   Sensible a la absorción de agua en los tejidos vegetales y a la humedad del suelo. Permite discriminar zonas con buena capacidad de retención hídrica de áreas degradadas, arenosas o con limitantes edáficas de profundidad.
-                4. **ICA (Índice Compuesto Integrado):**
-                   $$\\text{ICA} = 0.40 \\cdot \\text{NDVI} + 0.35 \\cdot \\text{NDRE} + 0.25 \\cdot \\text{NDWI}$$
-
-                #### 3. Algoritmo de Ambientación Multivariado
-                En la estrategia **Multivariada Completa**, cada píxel se procesa como un vector tridimensional $\\mathbf{X} = [\\text{NDVI}, \\text{NDRE}, \\text{NDWI}]$. 
-                El algoritmo no supervisado **Weka K-Means** en Earth Engine agrupa los píxeles en clusters por similitud espectral. Posteriormente, la plataforma calcula el perfil medio de cada grupo y los reordena de forma ascendente para que el **Ambiente 1 represente el menor nivel de vigor / actividad** y el **Ambiente 3 o 4 el mayor nivel de vigor / actividad**.
-
-                #### 4. Filtrado Espacial Morfológico (Focal Mode)
-                La resolución satelital de 10 metros suele capturar ruido local de micro-relieve o artefactos menores a escala de píxel ("efecto sal y pimienta"). 
-                El filtro morfológico modal de vecindad de 10 metros **homogeneiza los píxeles aislados reemplazándolos por la clase predominante de su entorno**. 
-                Esto permite delimitar **unidades de paisaje continuas, estables y representativas**, facilitando la zonificación de campos, planificación de potreros de pastoreo, manejo de suelos y recorridas de monitoreo territorial.
-
-                #### 5. Visualización Territorial y Navegación a Campo (KML & GeoJSON)
-                El archivo `.kml` generado cumple con el estándar abierto OGC KML 2.2 y está optimizado para su uso en diversas plataformas de análisis espacial:
-                - **Google Earth Pro:** Permite visualizar el lote en 3D con sus ambientes coloreados según su nivel de vigor / actividad y localizar los puntos de muestreo como chinchetas numeradas.
-                - **Sistemas de Información Geográfica (GIS):** Compatible nativamente con QGIS, ArcGIS y gvSIG para análisis espacial avanzado, cruce con cartas de suelos o mapas topográficos.
-                - **Dispositivos Móviles y Navegadores GPS:** Los puntos de muestreo pueden cargarse directamente en aplicaciones móviles de campo (Google Maps, OruxMaps, QField, Avenza Maps) o transferirse a receptores GPS de mano (Garmin) para guiar recorridas a campo, calicatas de suelo o muestreos de forraje.
-
-                ---
-                #### 🏛️ Créditos Institucionales
-                - **Diseño y Metodología:** Lic. Inf. Hernan Elena  
-                - **Institución:** Grupo de Recursos Naturales (RRNN) — INTA Estación Experimental Agropecuaria Salta  
-                - **Proyecto:** Proyecto PATCHACO  
-                - **Tecnologías:** Python, Streamlit, Google Earth Engine API, Folium, GeoPandas, Argenmap (IGN).
-                """)
+                render_manual_content()
 
     else:
         st.info("👋 Para comenzar, dibuja un polígono en el mapa inicial o sube un archivo KML/GeoJSON en la barra lateral.")
