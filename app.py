@@ -1426,7 +1426,69 @@ def main():
                 f"👉 **Recomendación:** Por favor, acota el dibujo en el mapa o divide tu archivo KML/GeoJSON en potreros o sectores menores a 10.000 ha."
             )
 
-        # Si aún no se procesó, mostrar vista previa del lote y botón de inicio
+        # 1. EJECUCIÓN DEL MOTOR DE PROCESAMIENTO (SI FUE DISPARADO)
+        if run_btn and not excede_limite:
+            with st.spinner("🛰️ Consultando Sentinel-2 Harmonized SR y procesando ambientación multiespectral..."):
+                try:
+                    composite, n_images = get_sentinel2_composite(ee_aoi, start_date, end_date, max_cloud_pct)
+                    if composite is None or n_images == 0:
+                        st.error(f"No se encontraron escenas de Sentinel-2 para el rango {start_date} al {end_date} con nubes < {max_cloud_pct}%. Amplía el rango de fechas.")
+                        return
+
+                    img_indices = calculate_agronomic_indices(composite)
+
+                    if "Multivariada" in ambientacion_mode:
+                        classified, metrics = classify_zones_multivariate_kmeans(
+                            img_indices, ee_aoi, num_zones=num_zones, smooth=smooth_filter
+                        )
+                        mode_tag = "Multivariada (NDVI + NDRE + NDWI)"
+                    else:
+                        if "NDRE" in ambientacion_mode:
+                            t_band = "NDRE"
+                        elif "NDWI" in ambientacion_mode:
+                            t_band = "NDWI"
+                        elif "ICA" in ambientacion_mode:
+                            t_band = "ICA"
+                        else:
+                            t_band = "NDVI"
+
+                        classified, metrics = classify_zones_quantiles(
+                            img_indices, ee_aoi, target_band=t_band, num_zones=num_zones, smooth=smooth_filter
+                        )
+                        mode_tag = f"Monovariable ({t_band})"
+
+                    gdf_zones = vectorize_zones_to_gdf(classified, ee_aoi, num_zones=num_zones)
+                    gdf_points = generate_sampling_points(gdf_zones, points_per_zone=points_per_zone)
+
+                    with st.spinner("📈 Calculando serie temporal de evolución fenológica por ambiente..."):
+                        df_phenology = calculate_temporal_phenology(
+                            ee_aoi, classified, start_date, end_date, max_cloud_pct, num_zones
+                        )
+
+                    st.session_state["results"] = {
+                        "n_images": n_images,
+                        "composite": composite,
+                        "img_indices": img_indices,
+                        "classified": classified,
+                        "metrics": metrics,
+                        "gdf_zones": gdf_zones,
+                        "gdf_points": gdf_points,
+                        "df_phenology": df_phenology,
+                        "num_zones": num_zones,
+                        "mode_tag": mode_tag,
+                        "center_lat": center_lat,
+                        "center_lon": center_lon,
+                        "lote_ha": lote_ha
+                    }
+                    clear_map_caches()
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"Error durante el procesamiento: {str(ex)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+
+        # 2. ESTADO A: AÚN NO SE PROCESÓ -> VISTA PREVIA Y CONFIRMACIÓN DE LOTE
         if st.session_state["results"] is None:
             st.markdown("### 📍 Vista Previa del Lote Delimitado")
             st.info(f"Parcela: **{st.session_state['aoi_name']}** — Superficie: **{lote_ha} hectáreas**. Revisa los límites y presiona el botón para procesar la ambientación.")
@@ -1491,68 +1553,9 @@ def main():
                 clear_map_caches()
                 st.rerun()
 
-        # Procesamiento
-        if run_btn and not excede_limite:
-            with st.spinner("🛰️ Consultando Sentinel-2 Harmonized SR y procesando ambientación multiespectral..."):
-                try:
-                    composite, n_images = get_sentinel2_composite(ee_aoi, start_date, end_date, max_cloud_pct)
-                    if composite is None or n_images == 0:
-                        st.error(f"No se encontraron escenas de Sentinel-2 para el rango {start_date} al {end_date} con nubes < {max_cloud_pct}%. Amplía el rango de fechas.")
-                        return
 
-                    img_indices = calculate_agronomic_indices(composite)
-
-                    if "Multivariada" in ambientacion_mode:
-                        classified, metrics = classify_zones_multivariate_kmeans(
-                            img_indices, ee_aoi, num_zones=num_zones, smooth=smooth_filter
-                        )
-                        mode_tag = "Multivariada (NDVI + NDRE + NDWI)"
-                    else:
-                        if "NDRE" in ambientacion_mode:
-                            t_band = "NDRE"
-                        elif "NDWI" in ambientacion_mode:
-                            t_band = "NDWI"
-                        elif "ICA" in ambientacion_mode:
-                            t_band = "ICA"
-                        else:
-                            t_band = "NDVI"
-
-                        classified, metrics = classify_zones_quantiles(
-                            img_indices, ee_aoi, target_band=t_band, num_zones=num_zones, smooth=smooth_filter
-                        )
-                        mode_tag = f"Monovariable ({t_band})"
-
-                    gdf_zones = vectorize_zones_to_gdf(classified, ee_aoi, num_zones=num_zones)
-                    gdf_points = generate_sampling_points(gdf_zones, points_per_zone=points_per_zone)
-
-                    with st.spinner("📈 Calculando serie temporal de evolución fenológica por ambiente..."):
-                        df_phenology = calculate_temporal_phenology(
-                            ee_aoi, classified, start_date, end_date, max_cloud_pct, num_zones
-                        )
-
-                    st.session_state["results"] = {
-                        "n_images": n_images,
-                        "composite": composite,
-                        "img_indices": img_indices,
-                        "classified": classified,
-                        "metrics": metrics,
-                        "gdf_zones": gdf_zones,
-                        "gdf_points": gdf_points,
-                        "df_phenology": df_phenology,
-                        "num_zones": num_zones,
-                        "mode_tag": mode_tag,
-                        "center_lat": center_lat,
-                        "center_lon": center_lon,
-                        "lote_ha": lote_ha
-                    }
-                    st.success("✅ ¡Ambientación y serie temporal generadas exitosamente!")
-                except Exception as ex:
-                    st.error(f"Error durante el procesamiento: {str(ex)}")
-                    import traceback
-                    st.code(traceback.format_exc())
-
-        # Si tenemos resultados procesados, mostrarlos en pantalla
-        if st.session_state["results"] is not None:
+        # 3. ESTADO B: YA SE PROCESÓ -> VISUALIZADOR ESPACIAL Y REPORTES
+        else:
             res = st.session_state["results"]
             composite = res["composite"]
             img_indices = res["img_indices"]
@@ -1563,6 +1566,20 @@ def main():
             metrics = res["metrics"]
             res_num_zones = res["num_zones"]
             res_mode = res.get("mode_tag", "Ambientación")
+
+            # Barra superior de navegación y acciones de resultados
+            col_res_header, col_res_actions = st.columns([2, 1])
+            with col_res_header:
+                st.markdown(f"### 🌾 Resultados de Ambientación: **{st.session_state['aoi_name']}**")
+                st.caption(f"Superficie: **{lote_ha} ha** • Estrategia: **{res_mode}** • **{res_num_zones} Zonas de Manejo**")
+            with col_res_actions:
+                act_c1, act_c2 = st.columns(2)
+                if act_c1.button("🔙 Ajustar Lote", use_container_width=True, help="Vuelve a la vista previa del contorno para cambiar parámetros o fechas"):
+                    st.session_state["results"] = None
+                    st.rerun()
+                if act_c2.button("🔄 Re-procesar", type="primary", use_container_width=True, help="Recalcula la ambientación con los parámetros actuales de la barra lateral"):
+                    st.session_state["trigger_process"] = True
+                    st.rerun()
 
             st.markdown("---")
             
