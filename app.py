@@ -34,7 +34,7 @@ MAX_SUPERFICIE_HA = 10000.0
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTILOS CSS
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="INTA AMBIENTE | Sentinel-2 GEE",
+    page_title="INTA AMBIENTE | PATCHACO",
     page_icon="🌱",
     layout="wide",
     initial_sidebar_state="expanded"
