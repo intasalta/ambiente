@@ -1485,7 +1485,7 @@ def main():
             tms=True,
             overlay=False,
             control=True,
-            show=False_gris
+            show=False
         ).add_to(m_draw)
 
         if st.session_state["geo_pin"]:
