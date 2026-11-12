@@ -2145,7 +2145,27 @@ def main():
     # Pie de página institucional
     st.markdown("---")
     st.caption("🏛️ **INTA AMBIENTE** • Instituto Nacional de Tecnología Agropecuaria (INTA) • Estación Experimental Agropecuaria Salta  \n👨‍💻 Diseñado por **Lic. Inf. Hernan Elena** (Grupo de Recursos Naturales) • Proyecto PATCHACO")
-
+    
+    # --- PIE DE BARRA LATERAL: CRÉDITOS Y AVISO LEGAL ---
+    st.sidebar.markdown("---")
+        
+    
+    # 2. Desplegable con el descargo completo y créditos
+    with st.sidebar.expander("⚖️ Aviso legal y créditos"):
+        st.markdown(
+            """
+            **Descargo de responsabilidad**  
+            Esta plataforma fue desarrollada por el **Laboratorio de Teledetección y SIG (EEA Salta - INTA)** con fines de divulgación, investigación y apoyo técnico.
+    
+            Los datos geoespaciales y ambientales aquí expuestos son referenciales, están sujetos a la escala y fecha de actualización de sus fuentes originales, y **no constituyen un documento legal ni vinculante** ni reemplazan relevamientos a campo o certificaciones oficiales.
+    
+            El Instituto Nacional de Tecnología Agropecuaria (INTA) no garantiza la ausencia de errores u omisiones ni asume responsabilidad por las decisiones, interpretaciones o consecuencias derivadas del uso de esta herramienta por parte de terceros.
+    
+            ---
+            **Licencia y cita:**  
+            Se autoriza su uso citando la fuente: *EEA Salta - INTA (2026)*.
+            """
+        )
 
 if __name__ == "__main__":
     main()
