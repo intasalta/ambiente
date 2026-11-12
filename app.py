@@ -25,7 +25,31 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon, Point
 import plotly.express as px
-import plotly.graph_objects as go
+import plotly.graph_objects as go
+import pyproj
+
+# Geod elipsoidal WGS84 para cálculo exacto de superficies geodésicas (idéntico a QGIS y Google Earth)
+_GEOD_WGS84 = pyproj.Geod(ellps="WGS84")
+
+
+def calculate_geodesic_area_ha(geom):
+    """Calcula el área geodésica real en hectáreas sobre el elipsoide WGS84.
+    
+    Evita la distorsión de escala de EPSG:3857 (Web Mercator), que sobrestima
+    el área en un ~21% a latitudes del norte argentino (-24° a -25°).
+    """
+    if geom is None or geom.is_empty:
+        return 0.0
+    try:
+        area_m2, _ = _GEOD_WGS84.geometry_area_perimeter(geom)
+        return round(abs(area_m2) / 10000.0, 2)
+    except Exception:
+        try:
+            gdf_local = gpd.GeoDataFrame(geometry=[geom], crs="EPSG:4326")
+            utm_crs = gdf_local.estimate_utm_crs()
+            return round(gdf_local.to_crs(utm_crs).geometry.area.iloc[0] / 10000.0, 2)
+        except Exception:
+            return 0.0
 
 # Constante de protección operativa para no saturar Google Earth Engine
 MAX_SUPERFICIE_HA = 10000.0
@@ -34,7 +58,7 @@ MAX_SUPERFICIE_HA = 10000.0
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTILOS CSS
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="INTA AMBIENTE | PATCHACO",
+    page_title="INTA AMBIENTE | Sentinel-2 GEE",
     page_icon="🌱",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -568,8 +592,7 @@ def vectorize_zones_to_gdf(classified_img, aoi_ee, num_zones=4):
     gdf["nombre_zona"] = gdf["zone_id"].map(labels_map)
     gdf["color_hex"] = gdf["zone_id"].map(color_hex_map)
 
-    gdf_metric = gdf.to_crs(epsg=3857)
-    gdf["area_ha"] = (gdf_metric.geometry.area / 10000.0).round(2)
+    gdf["area_ha"] = gdf.geometry.apply(calculate_geodesic_area_ha)
 
     return gdf
 
@@ -1233,8 +1256,7 @@ def main():
     ha_chk = 0.0
     if st.session_state["current_aoi"] is not None:
         try:
-            gdf_chk = gpd.GeoDataFrame(geometry=[st.session_state["current_aoi"]], crs="EPSG:4326").to_crs(epsg=3857)
-            ha_chk = round(gdf_chk.geometry.area.iloc[0] / 10000.0, 2)
+            ha_chk = calculate_geodesic_area_ha(st.session_state["current_aoi"])
         except Exception:
             pass
 
@@ -1383,8 +1405,7 @@ def main():
         centroid = shapely_aoi.centroid
         center_lat, center_lon = centroid.y, centroid.x
 
-        gdf_temp = gpd.GeoDataFrame(geometry=[shapely_aoi], crs="EPSG:4326").to_crs(epsg=3857)
-        lote_ha = round(gdf_temp.geometry.area.iloc[0] / 10000.0, 2)
+        lote_ha = calculate_geodesic_area_ha(shapely_aoi)
         excede_limite = lote_ha > MAX_SUPERFICIE_HA
 
         # Banner de Métricas Responsivas (diseño que no se desborda en pantalla)
