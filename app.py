@@ -283,48 +283,72 @@ def decimal_to_dms(val, is_lat=True):
 
 
 def parse_free_coordinate_string(text):
-    """Parsea una cadena en decimal o sexagesimal."""
+    """Parsea una cadena en formato Decimal o Sexagesimal (DMS) con soporte para S/N y W/O."""
+    if not text:
+        return None, None
     text = text.strip()
-    dec_match = re.findall(r"[-+]?\d*\.?\d+", text)
-    if len(dec_match) == 2 and ("°" not in text and "'" not in text):
+    
+    # 1. Decimal con punto y coma: -24,9015; -65,4820
+    if ";" in text:
+        parts = text.split(";")
+        if len(parts) == 2:
+            try:
+                lat = float(parts[0].strip().replace(",", "."))
+                lon = float(parts[1].strip().replace(",", "."))
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    return lat, lon
+            except Exception:
+                pass
+
+    # 2. Decimal estándar: -24.9015, -65.4820 o -24.9015 -65.4820
+    clean = re.sub(r"[,;]", " ", text)
+    tokens = clean.split()
+    if len(tokens) == 2:
         try:
-            lat = float(dec_match[0])
-            lon = float(dec_match[1])
+            lat = float(tokens[0])
+            lon = float(tokens[1])
             if -90 <= lat <= 90 and -180 <= lon <= 180:
                 return lat, lon
-        except Exception:
+        except ValueError:
             pass
 
-    try:
-        parts = re.split(r"[,;]", text)
-        if len(parts) >= 2:
-            lat_str, lon_str = parts[0].strip(), parts[1].strip()
+    # 3. DMS (Grados, Minutos, Segundos)
+    def parse_dms_part(s):
+        s = s.strip()
+        hemi = None
+        for h in ["S", "N", "W", "O", "E"]:
+            if h in s.upper():
+                hemi = h.upper()
+                break
+        nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", s.replace(",", "."))]
+        if not nums:
+            return None
+        if len(nums) == 1:
+            val = nums[0]
+        elif len(nums) == 2:
+            val = nums[0] + nums[1] / 60.0
+        else:
+            val = nums[0] + nums[1] / 60.0 + nums[2] / 3600.0
+        if hemi in ["S", "W", "O"] or "-" in s:
+            val = -abs(val)
+        return val
 
-            def extract_dms(s):
-                hemi = "N"
-                for h in ["S", "N", "O", "W", "E"]:
-                    if h in s.upper():
-                        hemi = h
-                        break
-                nums = [float(x) for x in re.findall(r"\d+\.?\d*", s)]
-                if len(nums) == 1:
-                    v = nums[0]
-                elif len(nums) == 2:
-                    v = nums[0] + nums[1] / 60.0
-                elif len(nums) >= 3:
-                    v = nums[0] + nums[1] / 60.0 + nums[2] / 3600.0
-                else:
-                    return None
-                if hemi in ["S", "O", "W"] or "-" in s:
-                    v = -abs(v)
-                return v
+    # Separación por coma, punto y coma o barra
+    parts = re.split(r"[,;/]", text)
+    if len(parts) >= 2:
+        lat = parse_dms_part(parts[0])
+        lon = parse_dms_part(parts[1])
+        if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
 
-            lat = extract_dms(lat_str)
-            lon = extract_dms(lon_str)
-            if lat is not None and lon is not None:
-                return lat, lon
-    except Exception:
-        pass
+    # Separación por espacio tras la primera letra de hemisferio (S o N)
+    m = re.search(r"([sSnN])\s+([0-9])", text)
+    if m:
+        idx = m.start() + 1
+        lat = parse_dms_part(text[:idx])
+        lon = parse_dms_part(text[idx:])
+        if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
 
     return None, None
 
@@ -1394,33 +1418,94 @@ def main():
     # CASO A: Aún no tenemos polígono
     if st.session_state["current_aoi"] is None and aoi_source == "✏️ Dibujar en el Mapa":
         st.markdown("### 🗺️ Paso 1: Dibuja tu parcela en el mapa interactivo")
-        st.caption("Navega por el mapa o usa la herramienta de geoposicionamiento en la barra lateral. Utiliza el icono de polígono o rectángulo (arriba a la izquierda) para trazar los límites del lote (límite operativo máximo: **10.000 ha**).")
+        st.caption("Navega por el mapa, utiliza la búsqueda de coordenadas directa o alterna entre Google Satélite y Argenmap IGN. Traza los límites con la herramienta de polígono o rectángulo (arriba a la izquierda).")
+
+        # Barra interactiva superior: Ir a Coordenadas + Selector de Mapa Base
+        c_nav1, c_nav2 = st.columns([2.5, 1.2])
+
+        with c_nav1:
+            st.markdown("##### 📍 Ir a Coordenadas del Lote")
+            col_cin, col_cgo, col_cclr = st.columns([3, 1.3, 0.9])
+            coord_search_val = col_cin.text_input(
+                "Coordenadas:",
+                placeholder='Ej: -24.9015, -65.4820 o 24° 54\' 05" S, 65° 28\' 55" O',
+                label_visibility="collapsed",
+                key="main_coord_search"
+            )
+            if col_cgo.button("📍 Centrar Mapa", use_container_width=True, type="primary"):
+                lat_f, lon_f = parse_free_coordinate_string(coord_search_val)
+                if lat_f is not None and lon_f is not None:
+                    st.session_state["geo_pin"] = [lat_f, lon_f]
+                    clear_map_caches()
+                    st.rerun()
+                else:
+                    st.error('Formato no reconocido. Ingresa Decimal (ej: -24.90, -65.48) o Sexagesimal (ej: 24° 54\' 05" S, 65° 28\' 55" O).')
+
+            if col_cclr.button("✖️ Quitar", use_container_width=True, help="Quita el marcador de referencia del mapa"):
+                st.session_state["geo_pin"] = None
+                clear_map_caches()
+                st.rerun()
+
+            if st.session_state.get("geo_pin"):
+                plat, plon = st.session_state["geo_pin"]
+                st.caption(f"📍 **Centrado activo:** `{plat:.5f}, {plon:.5f}` (Marcador rojo fijado en el mapa)")
+
+        with c_nav2:
+            st.markdown("##### 🗺️ Capa Base del Mapa")
+            if "selected_basemap" not in st.session_state:
+                st.session_state["selected_basemap"] = "🛰️ Google Satélite"
+            
+            basemap_choice = st.radio(
+                "Mapa Base:",
+                ["🛰️ Google Satélite", "🗺️ Argenmap IGN Oficial", "🗺️ Argenmap Gris (IGN)"],
+                horizontal=False,
+                label_visibility="collapsed",
+                key="selected_basemap"
+            )
 
         map_center = st.session_state["geo_pin"] if st.session_state["geo_pin"] else [-24.90, -65.48]
         map_zoom = 15 if st.session_state["geo_pin"] else 13
         
-        # Google Satellite SIEMPRE por defecto como base principal con nombre limpio
         m_draw = folium.Map(
             location=map_center,
             zoom_start=map_zoom,
             tiles=None
         )
+
+        show_sat = (basemap_choice == "🛰️ Google Satélite")
+        show_argenmap = (basemap_choice == "🗺️ Argenmap IGN Oficial")
+        show_argenmap_gris = (basemap_choice == "🗺️ Argenmap Gris (IGN)")
+
+        # 1. Google Satellite
         folium.TileLayer(
             tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
             attr="Google Satellite",
             name="Google Satélite (Alta Resolución)",
             overlay=False,
-            control=True
+            control=True,
+            show=show_sat
         ).add_to(m_draw)
 
-        # Argenmap agregada como capa base secundaria (show=False)
+        # 2. Argenmap Oficial IGN (TMS endpoint oficial con {-y})
         folium.TileLayer(
-            tiles="https://wms.ign.gob.ar/geoserver/gwc/service/wmts/rest/capabaseargenmap/normal/EPSG:3857/EPSG:3857:{z}/{y}/{x}?format=image/png",
-            attr="Instituto Geográfico Nacional (IGN Argentina)",
+            tiles="https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/capabaseargenmap@EPSG%3A3857@png/{z}/{x}/{-y}.png",
+            attr="<a href='https://www.ign.gob.ar' target='_blank'>Instituto Geográfico Nacional</a>",
             name="Argenmap (IGN Argentina)",
+            tms=True,
             overlay=False,
             control=True,
-            show=False
+            show=show_argenmap
+        ).add_to(m_draw)
+
+        # 3. Argenmap Gris IGN
+        folium.TileLayer(
+            tiles="https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/mapabase_gris@EPSG%3A3857@png/{z}/{x}/{-y}.png",
+            attr="<a href='https://www.ign.gob.ar' target='_blank'>Instituto Geográfico Nacional</a>",
+            name="Argenmap Gris (IGN Argentina)",
+            tms=True,
+            overlay=False,
+            control=True,
+            show=show_argenmap_gris
         ).add_to(m_draw)
 
         if st.session_state["geo_pin"]:
@@ -1625,11 +1710,23 @@ def main():
                     overlay=False,
                     control=True
                 ).add_to(m_prev)
-                # Argenmap secundaria
+                # Argenmap Oficial IGN (TMS)
                 folium.TileLayer(
-                    tiles="https://wms.ign.gob.ar/geoserver/gwc/service/wmts/rest/capabaseargenmap/normal/EPSG:3857/EPSG:3857:{z}/{y}/{x}?format=image/png",
-                    attr="Instituto Geográfico Nacional (IGN Argentina)",
+                    tiles="https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/capabaseargenmap@EPSG%3A3857@png/{z}/{x}/{-y}.png",
+                    attr="<a href='https://www.ign.gob.ar' target='_blank'>Instituto Geográfico Nacional</a>",
                     name="Argenmap (IGN Argentina)",
+                    tms=True,
+                    overlay=False,
+                    control=True,
+                    show=False
+                ).add_to(m_prev)
+
+                # Argenmap Gris IGN
+                folium.TileLayer(
+                    tiles="https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/mapabase_gris@EPSG%3A3857@png/{z}/{x}/{-y}.png",
+                    attr="<a href='https://www.ign.gob.ar' target='_blank'>Instituto Geográfico Nacional</a>",
+                    name="Argenmap Gris (IGN Argentina)",
+                    tms=True,
                     overlay=False,
                     control=True,
                     show=False
@@ -1763,7 +1860,7 @@ def main():
                         col_sw1, col_sw2 = st.columns(2)
                         swipe_left_name = col_sw1.selectbox(
                             "Capa Izquierda (Base):",
-                            ["Google Satélite", "Color Natural (RGB)", "Falso Color CIR", "NDVI Continuo"],
+                            ["Google Satélite", "Argenmap IGN Oficial", "Color Natural (RGB)", "Falso Color CIR", "NDVI Continuo"],
                             index=0
                         )
                         swipe_right_name = col_sw2.selectbox(
@@ -1788,6 +1885,13 @@ def main():
                                 tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
                                 attr="Google Satellite",
                                 name="Google Satélite"
+                            )
+                        elif swipe_left_name == "Argenmap IGN Oficial":
+                            layer_left = folium.TileLayer(
+                                tiles="https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/capabaseargenmap@EPSG%3A3857@png/{z}/{x}/{-y}.png",
+                                attr="<a href='https://www.ign.gob.ar' target='_blank'>Instituto Geográfico Nacional</a>",
+                                name="Argenmap (IGN Argentina)",
+                                tms=True
                             )
                         elif swipe_left_name == "Color Natural (RGB)":
                             layer_left = get_ee_tile_layer(composite, vis_rgb, "Color Natural RGB")
@@ -1846,9 +1950,20 @@ def main():
                         ).add_to(m)
 
                         folium.TileLayer(
-                            tiles="https://wms.ign.gob.ar/geoserver/gwc/service/wmts/rest/capabaseargenmap/normal/EPSG:3857/EPSG:3857:{z}/{y}/{x}?format=image/png",
-                            attr="Instituto Geográfico Nacional (IGN Argentina)",
+                            tiles="https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/capabaseargenmap@EPSG%3A3857@png/{z}/{x}/{-y}.png",
+                            attr="<a href='https://www.ign.gob.ar' target='_blank'>Instituto Geográfico Nacional</a>",
                             name="Argenmap (IGN Argentina)",
+                            tms=True,
+                            overlay=False,
+                            control=True,
+                            show=False
+                        ).add_to(m)
+
+                        folium.TileLayer(
+                            tiles="https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/mapabase_gris@EPSG%3A3857@png/{z}/{x}/{-y}.png",
+                            attr="<a href='https://www.ign.gob.ar' target='_blank'>Instituto Geográfico Nacional</a>",
+                            name="Argenmap Gris (IGN Argentina)",
+                            tms=True,
                             overlay=False,
                             control=True,
                             show=False
