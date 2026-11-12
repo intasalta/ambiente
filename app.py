@@ -1420,48 +1420,32 @@ def main():
         st.markdown("### 🗺️ Paso 1: Dibuja tu parcela en el mapa interactivo")
         st.caption("Navega por el mapa, utiliza la búsqueda de coordenadas directa o alterna entre Google Satélite y Argenmap IGN. Traza los límites con la herramienta de polígono o rectángulo (arriba a la izquierda).")
 
-        # Barra interactiva superior: Ir a Coordenadas + Selector de Mapa Base
-        c_nav1, c_nav2 = st.columns([2.5, 1.2])
-
-        with c_nav1:
-            st.markdown("##### 📍 Ir a Coordenadas del Lote")
-            col_cin, col_cgo, col_cclr = st.columns([3, 1.3, 0.9])
-            coord_search_val = col_cin.text_input(
-                "Coordenadas:",
-                placeholder='Ej: -24.9015, -65.4820 o 24° 54\' 05" S, 65° 28\' 55" O',
-                label_visibility="collapsed",
-                key="main_coord_search"
-            )
-            if col_cgo.button("📍 Centrar Mapa", use_container_width=True, type="primary"):
-                lat_f, lon_f = parse_free_coordinate_string(coord_search_val)
-                if lat_f is not None and lon_f is not None:
-                    st.session_state["geo_pin"] = [lat_f, lon_f]
-                    clear_map_caches()
-                    st.rerun()
-                else:
-                    st.error('Formato no reconocido. Ingresa Decimal (ej: -24.90, -65.48) o Sexagesimal (ej: 24° 54\' 05" S, 65° 28\' 55" O).')
-
-            if col_cclr.button("✖️ Quitar", use_container_width=True, help="Quita el marcador de referencia del mapa"):
-                st.session_state["geo_pin"] = None
+        # Barra interactiva de geoposicionamiento por coordenadas
+        st.markdown("##### 📍 Ir a Coordenadas del Lote")
+        col_cin, col_cgo, col_cclr = st.columns([4, 1.2, 0.8])
+        coord_search_val = col_cin.text_input(
+            "Coordenadas:",
+            placeholder='Ej: -24.9015, -65.4820 o 24° 54\' 05" S, 65° 28\' 55" O',
+            label_visibility="collapsed",
+            key="main_coord_search"
+        )
+        if col_cgo.button("📍 Centrar Mapa", use_container_width=True, type="primary"):
+            lat_f, lon_f = parse_free_coordinate_string(coord_search_val)
+            if lat_f is not None and lon_f is not None:
+                st.session_state["geo_pin"] = [lat_f, lon_f]
                 clear_map_caches()
                 st.rerun()
+            else:
+                st.error('Formato no reconocido. Ingresa Decimal (ej: -24.90, -65.48) o Sexagesimal (ej: 24° 54\' 05" S, 65° 28\' 55" O).')
 
-            if st.session_state.get("geo_pin"):
-                plat, plon = st.session_state["geo_pin"]
-                st.caption(f"📍 **Centrado activo:** `{plat:.5f}, {plon:.5f}` (Marcador rojo fijado en el mapa)")
+        if col_cclr.button("✖️ Quitar", use_container_width=True, help="Quita el marcador de referencia del mapa"):
+            st.session_state["geo_pin"] = None
+            clear_map_caches()
+            st.rerun()
 
-        with c_nav2:
-            st.markdown("##### 🗺️ Capa Base del Mapa")
-            if "selected_basemap" not in st.session_state:
-                st.session_state["selected_basemap"] = "🛰️ Google Satélite"
-            
-            basemap_choice = st.radio(
-                "Mapa Base:",
-                ["🛰️ Google Satélite", "🗺️ Argenmap IGN Oficial", "🗺️ Argenmap Gris (IGN)"],
-                horizontal=False,
-                label_visibility="collapsed",
-                key="selected_basemap"
-            )
+        if st.session_state.get("geo_pin"):
+            plat, plon = st.session_state["geo_pin"]
+            st.caption(f"📍 **Centrado activo:** `{plat:.5f}, {plon:.5f}` (Marcador rojo fijado en el mapa)")
 
         map_center = st.session_state["geo_pin"] if st.session_state["geo_pin"] else [-24.90, -65.48]
         map_zoom = 15 if st.session_state["geo_pin"] else 13
@@ -1472,10 +1456,6 @@ def main():
             tiles=None
         )
 
-        show_sat = (basemap_choice == "🛰️ Google Satélite")
-        show_argenmap = (basemap_choice == "🗺️ Argenmap IGN Oficial")
-        show_argenmap_gris = (basemap_choice == "🗺️ Argenmap Gris (IGN)")
-
         # 1. Google Satellite
         folium.TileLayer(
             tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
@@ -1483,7 +1463,7 @@ def main():
             name="Google Satélite (Alta Resolución)",
             overlay=False,
             control=True,
-            show=show_sat
+            show=True
         ).add_to(m_draw)
 
         # 2. Argenmap Oficial IGN (TMS endpoint oficial con {-y})
@@ -1494,7 +1474,7 @@ def main():
             tms=True,
             overlay=False,
             control=True,
-            show=show_argenmap
+            show=False
         ).add_to(m_draw)
 
         # 3. Argenmap Gris IGN
@@ -1505,7 +1485,7 @@ def main():
             tms=True,
             overlay=False,
             control=True,
-            show=show_argenmap_gris
+            show=False_gris
         ).add_to(m_draw)
 
         if st.session_state["geo_pin"]:
