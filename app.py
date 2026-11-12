@@ -25,34 +25,60 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon, Point
 import plotly.express as px
-import plotly.graph_objects as go
-import pyproj
-
-# Geod elipsoidal WGS84 para cálculo exacto de superficies geodésicas (idéntico a QGIS y Google Earth)
-_GEOD_WGS84 = pyproj.Geod(ellps="WGS84")
-
-
-def calculate_geodesic_area_ha(geom):
-    """Calcula el área geodésica real en hectáreas sobre el elipsoide WGS84.
-    
-    Evita la distorsión de escala de EPSG:3857 (Web Mercator), que sobrestima
-    el área en un ~21% a latitudes del norte argentino (-24° a -25°).
-    """
-    if geom is None or geom.is_empty:
-        return 0.0
-    try:
-        area_m2, _ = _GEOD_WGS84.geometry_area_perimeter(geom)
-        return round(abs(area_m2) / 10000.0, 2)
-    except Exception:
-        try:
-            gdf_local = gpd.GeoDataFrame(geometry=[geom], crs="EPSG:4326")
-            utm_crs = gdf_local.estimate_utm_crs()
-            return round(gdf_local.to_crs(utm_crs).geometry.area.iloc[0] / 10000.0, 2)
-        except Exception:
+import plotly.graph_objects as go
+
+import pyproj
+
+
+
+# Geod elipsoidal WGS84 para cálculo exacto de superficies geodésicas (idéntico a QGIS y Google Earth)
+
+_GEOD_WGS84 = pyproj.Geod(ellps="WGS84")
+
+
+
+
+
+def calculate_geodesic_area_ha(geom):
+
+    """Calcula el área geodésica real en hectáreas sobre el elipsoide WGS84.
+
+    
+
+    Evita la distorsión de escala de EPSG:3857 (Web Mercator), que sobrestima
+
+    el área en un ~21% a latitudes del norte argentino (-24° a -25°).
+
+    """
+
+    if geom is None or geom.is_empty:
+
+        return 0.0
+
+    try:
+
+        area_m2, _ = _GEOD_WGS84.geometry_area_perimeter(geom)
+
+        return round(abs(area_m2) / 10000.0, 2)
+
+    except Exception:
+
+        try:
+
+            gdf_local = gpd.GeoDataFrame(geometry=[geom], crs="EPSG:4326")
+
+            utm_crs = gdf_local.estimate_utm_crs()
+
+            return round(gdf_local.to_crs(utm_crs).geometry.area.iloc[0] / 10000.0, 2)
+
+        except Exception:
+
             return 0.0
 
-# Constante de protección operativa para no saturar Google Earth Engine
+# Constantes de protección operativa y agronómica para Google Earth Engine
 MAX_SUPERFICIE_HA = 10000.0
+MAX_PERIODO_DIAS = 730   # 2 años máximo permitido (preserva consistencia agronómica y cuota GEE)
+MIN_PERIODO_DIAS = 15    # Mínimo para asegurar pasadas de Sentinel-2 libres de nubes
 
 # ---------------------------------------------------------------------------
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTILOS CSS
@@ -952,6 +978,8 @@ def render_manual_content():
         - **Rango de Fechas (Inicio y Fin):**
           - Por defecto se sugiere un intervalo de 90 días hacia atrás desde la fecha actual.
           - Se recomienda seleccionar una ventana temporal de **60 a 90 días** coincidente con el período crítico del cultivo (ej: floración / llenado de granos en cultivos de grano) o la época de máxima actividad forrajera en pasturas y pastizales naturales.
+          - **Tope Máximo Permitido (730 días / 2 años):** Para preservar el rigor agronómico (no mezclar rotaciones disímiles que aplanen las limitantes del suelo) y evitar fallas por saturación de memoria en Google Earth Engine, el rango no debe superar los 2 años.
+          - **Atajos de Selección Rápida:** Cuentas con botones de 1 clic para configurar **90 días**, **180 días**, **1 Año** y **2 Años**.
         - **Cobertura Máxima de Nubes (%):**
           - Permite descartar escenas con nubosidad general elevada (por defecto 15%).
           - Además, la plataforma aplica la máscara píxel a píxel **Scene Classification Layer (SCL)** provista por la ESA a 10-20 m, descartando sombras, cirros y nubes residuales de cada imagen.
@@ -1122,6 +1150,11 @@ def main():
         st.session_state["last_aoi_source"] = None
     if "geo_pin" not in st.session_state:
         st.session_state["geo_pin"] = None
+    today = datetime.date.today()
+    if "filter_start_date" not in st.session_state:
+        st.session_state["filter_start_date"] = today - datetime.timedelta(days=90)
+    if "filter_end_date" not in st.session_state:
+        st.session_state["filter_end_date"] = today
 
     # Sidebar: Logo y Configuración
     with st.sidebar:
@@ -1201,12 +1234,50 @@ def main():
 
     # 2. Sentinel-2
     st.sidebar.subheader("2. Filtro Sentinel-2")
+
+    # Atajos rápidos de período
+    st.sidebar.caption("⚡ **Atajos de período:**")
+    preset_c1, preset_c2 = st.sidebar.columns(2)
+    preset_c3, preset_c4 = st.sidebar.columns(2)
+
+    def apply_date_preset(days_back):
+        t_now = datetime.date.today()
+        st.session_state["filter_start_date"] = t_now - datetime.timedelta(days=days_back)
+        st.session_state["filter_end_date"] = t_now
+        clear_map_caches()
+
+    if preset_c1.button("🌱 90 días", use_container_width=True, help="Últimos 90 días: ventana de campaña activa"):
+        apply_date_preset(90)
+        st.rerun()
+    if preset_c2.button("🌾 180 días", use_container_width=True, help="Últimos 180 días: ciclo completo estival/invernal"):
+        apply_date_preset(180)
+        st.rerun()
+    if preset_c3.button("📅 1 Año", use_container_width=True, help="Últimos 365 días: balance anual de rotación"):
+        apply_date_preset(365)
+        st.rerun()
+    if preset_c4.button("⏳ 2 Años (Tope)", use_container_width=True, help="Últimos 730 días: tope agronómico permitido"):
+        apply_date_preset(730)
+        st.rerun()
+
     col_d1, col_d2 = st.sidebar.columns(2)
-    today = datetime.date.today()
-    default_start = today - datetime.timedelta(days=90)
-    
-    start_date = col_d1.date_input("Fecha Inicio:", value=default_start)
-    end_date = col_d2.date_input("Fecha Fin:", value=today)
+    start_date = col_d1.date_input("Fecha Inicio:", key="filter_start_date")
+    end_date = col_d2.date_input("Fecha Fin:", key="filter_end_date")
+
+    # Validaciones temporales agronómicas y de GEE
+    fecha_invertida = start_date >= end_date
+    periodo_dias = (end_date - start_date).days if not fecha_invertida else 0
+    excede_periodo = periodo_dias > MAX_PERIODO_DIAS
+    periodo_muy_corto = (periodo_dias < MIN_PERIODO_DIAS) if not fecha_invertida else False
+    periodo_invalido = fecha_invertida or excede_periodo or periodo_muy_corto
+
+    if fecha_invertida:
+        st.sidebar.error("❌ La fecha de inicio debe ser anterior a la de fin.")
+    elif excede_periodo:
+        st.sidebar.error(f"⛔ Rango excesivo ({periodo_dias} días). Máximo: {MAX_PERIODO_DIAS} días (2 años).")
+    elif periodo_muy_corto:
+        st.sidebar.warning(f"⚠️ Período muy corto ({periodo_dias} días). Mínimo: {MIN_PERIODO_DIAS} días.")
+    else:
+        st.sidebar.caption(f"📅 **Ventana temporal:** {periodo_dias} días seleccionados.")
 
     max_cloud_pct = st.sidebar.slider(
         "Cobertura máxima de nubes (%):",
@@ -1289,7 +1360,7 @@ def main():
     st.sidebar.caption(f"📍 **Total:** {total_pts_estimados} puntos en el lote ({points_per_zone} por cada uno de los {num_zones} ambientes).")
     st.sidebar.caption(f"💡 *{cap_note}*")
 
-    sidebar_disabled = (ha_chk > MAX_SUPERFICIE_HA)
+    sidebar_disabled = (ha_chk > MAX_SUPERFICIE_HA) or periodo_invalido
 
     run_btn = st.sidebar.button(
         "🚀 Procesar Ambientación",
@@ -1413,6 +1484,16 @@ def main():
         metric_sup_color = "color: #e63946; font-weight: bold;" if excede_limite else ""
         metric_sup_sub = "⚠️ Excede 10.000 ha" if excede_limite else "Área de Parcela"
 
+        metric_dias_color = "color: #e63946; font-weight: bold;" if periodo_invalido else ""
+        if fecha_invertida:
+            metric_dias_sub = "⚠️ Rango Invertido"
+        elif excede_periodo:
+            metric_dias_sub = f"⚠️ Excede {MAX_PERIODO_DIAS}d"
+        elif periodo_muy_corto:
+            metric_dias_sub = f"⚠️ Muy corto (<{MIN_PERIODO_DIAS}d)"
+        else:
+            metric_dias_sub = f"{start_date.strftime('%d/%m/%y')} al {end_date.strftime('%d/%m/%y')}"
+
         st.markdown(f"""
         <div class="metrics-container">
             <div class="metric-pill">
@@ -1422,8 +1503,8 @@ def main():
             </div>
             <div class="metric-pill">
                 <div class="metric-pill-label">Período Temporal</div>
-                <div class="metric-pill-value">{(end_date - start_date).days} días</div>
-                <div class="metric-pill-sub">{start_date.strftime('%d/%m/%y')} al {end_date.strftime('%d/%m/%y')}</div>
+                <div class="metric-pill-value" style="{metric_dias_color}">{periodo_dias} días</div>
+                <div class="metric-pill-sub">{metric_dias_sub}</div>
             </div>
             <div class="metric-pill">
                 <div class="metric-pill-label">Filtro de Nubes</div>
@@ -1447,8 +1528,21 @@ def main():
                 f"👉 **Recomendación:** Por favor, acota el dibujo en el mapa o divide tu archivo KML/GeoJSON en potreros o sectores menores a 10.000 ha."
             )
 
+        if excede_periodo:
+            st.error(
+                f"⛔ **Período temporal muy extenso ({periodo_dias} días seleccionados):**\n\n"
+                f"El período máximo admitido es de **{MAX_PERIODO_DIAS} días (2 años)**.\n\n"
+                f"🌾 **Fundamento Agronómico:** Intervalos mayores mezclan rotaciones de cultivos y manejos distintos, diluyendo los contrastes del suelo.\n\n"
+                f"🛰️ **Fundamento Técnico:** Previene el colapso de memoria en Google Earth Engine (`User memory limit exceeded`) al reducir cientos de escenas de Sentinel-2.\n\n"
+                f"👉 **Recomendación:** Utiliza los atajos de la barra lateral (90, 180 o 365 días) o ajusta las fechas a un intervalo de hasta 2 años."
+            )
+        elif fecha_invertida:
+            st.error("⛔ **Rango de fechas invertido:** La Fecha de Inicio debe ser anterior a la Fecha de Fin.")
+        elif periodo_muy_corto:
+            st.warning(f"⚠️ **Período muy corto ({periodo_dias} días):** Se recomienda un mínimo de {MIN_PERIODO_DIAS} días para contar con suficientes pasadas de Sentinel-2 libres de nubes.")
+
         # 1. EJECUCIÓN DEL MOTOR DE PROCESAMIENTO (SI FUE DISPARADO)
-        if run_btn and not excede_limite:
+        if run_btn and not excede_limite and not periodo_invalido:
             with st.spinner("🛰️ Consultando Sentinel-2 Harmonized SR y procesando ambientación multiespectral..."):
                 try:
                     composite, n_images = get_sentinel2_composite(ee_aoi, start_date, end_date, max_cloud_pct)
@@ -1562,7 +1656,11 @@ def main():
 
             col_btn1, col_btn2 = st.columns([3, 1])
             if excede_limite:
-                col_btn1.button("🚫 Procesamiento Deshabilitado (Supera 10.000 ha)", disabled=True, use_container_width=True)
+                col_btn1.button("🚫 Deshabilitado (Supera 10.000 ha)", disabled=True, use_container_width=True)
+            elif excede_periodo:
+                col_btn1.button(f"🚫 Deshabilitado (Período supera {MAX_PERIODO_DIAS} días)", disabled=True, use_container_width=True)
+            elif fecha_invertida or periodo_muy_corto:
+                col_btn1.button("🚫 Deshabilitado (Revisar Fechas)", disabled=True, use_container_width=True)
             else:
                 if col_btn1.button("🚀 Iniciar Procesamiento de Ambientación", type="primary", use_container_width=True):
                     st.session_state["trigger_process"] = True
@@ -1598,7 +1696,7 @@ def main():
                 if act_c1.button("🔙 Ajustar Lote", use_container_width=True, help="Vuelve a la vista previa del contorno para cambiar parámetros o fechas"):
                     st.session_state["results"] = None
                     st.rerun()
-                if act_c2.button("🔄 Re-procesar", type="primary", use_container_width=True, help="Recalcula la ambientación con los parámetros actuales de la barra lateral"):
+                if act_c2.button("🔄 Re-procesar", type="primary", disabled=sidebar_disabled, use_container_width=True, help="Recalcula la ambientación con los parámetros actuales de la barra lateral"):
                     st.session_state["trigger_process"] = True
                     st.rerun()
 
