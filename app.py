@@ -603,9 +603,13 @@ def classify_zones_multivariate_kmeans(img_indices, aoi_ee, num_zones=4, smooth=
     return classified, reordered_metrics
 
 
-def vectorize_zones_to_gdf(classified_img, aoi_ee, num_zones=4):
-    """Vectoriza el ráster clasificado a GeoPandas GeoDataFrame con cálculo de hectáreas."""
-    vectors = classified_img.reduceToVectors(
+def vectorize_zones_to_gdf(classified_img, aoi_ee, num_zones=4, shapely_aoi=None):
+    """Vectoriza el ráster clasificado a GeoPandas GeoDataFrame con recorte exacto al AOI."""
+    # 1. Enmascaramiento estricto en GEE para evitar que el bounding box arrastre píxeles externos
+    aoi_mask = ee.Image.constant(1).clip(aoi_ee)
+    masked_img = classified_img.updateMask(aoi_mask)
+
+    vectors = masked_img.reduceToVectors(
         geometry=aoi_ee,
         scale=10,
         geometryType="polygon",
@@ -622,6 +626,11 @@ def vectorize_zones_to_gdf(classified_img, aoi_ee, num_zones=4):
 
     gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
     gdf["zone_id"] = gdf["zone_id"].astype(int)
+
+    # 2. Recorte vectorial exacto en Shapely contra el perímetro original del lote (KML o Dibujo)
+    if shapely_aoi is not None and not shapely_aoi.is_empty:
+        gdf["geometry"] = gdf.geometry.make_valid().intersection(shapely_aoi)
+        gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notnull()].copy()
 
     if num_zones == 3:
         labels_map = {
@@ -642,7 +651,11 @@ def vectorize_zones_to_gdf(classified_img, aoi_ee, num_zones=4):
     gdf["nombre_zona"] = gdf["zone_id"].map(labels_map)
     gdf["color_hex"] = gdf["zone_id"].map(color_hex_map)
 
-    gdf["area_ha"] = gdf.geometry.apply(calculate_geodesic_area_ha)
+    # 3. Cálculo geodésico exacto sobre el elipsoide WGS84
+    gdf["area_ha_exact"] = gdf.geometry.apply(
+        lambda g: abs(_GEOD_WGS84.geometry_area_perimeter(g)[0]) / 10000.0 if (g and not g.is_empty) else 0.0
+    )
+    gdf["area_ha"] = gdf["area_ha_exact"].round(2)
 
     return gdf
 
@@ -1637,7 +1650,13 @@ def main():
                         )
                         mode_tag = f"Monovariable ({t_band})"
 
-                    gdf_zones = vectorize_zones_to_gdf(classified, ee_aoi, num_zones=num_zones)
+                    
+                    gdf_zones = vectorize_zones_to_gdf(
+                        classified, 
+                        ee_aoi, 
+                        num_zones=num_zones, 
+                        shapely_aoi=shapely_aoi
+                    )
                     gdf_points = generate_sampling_points(gdf_zones, points_per_zone=points_per_zone)
 
                     with st.spinner("📈 Calculando serie temporal de evolución fenológica por ambiente..."):
@@ -2054,11 +2073,15 @@ def main():
             with tab_estadisticas:
                 st.markdown(f"#### 📊 Caracterización Cuantitativa — `{res_mode}`")
 
+                area_col = "area_ha_exact" if "area_ha_exact" in gdf_zones.columns else "area_ha"
+
                 summary_df = (
-                    gdf_zones.groupby(["zone_id", "nombre_zona", "color_hex"])["area_ha"]
+                    gdf_zones.groupby(["zone_id", "nombre_zona", "color_hex"])[area_col]
                     .sum()
                     .reset_index()
+                    .rename(columns={area_col: "area_ha"})
                 )
+                summary_df["area_ha"] = summary_df["area_ha"].round(2)
                 total_area = summary_df["area_ha"].sum()
                 summary_df["porcentaje"] = ((summary_df["area_ha"] / total_area) * 100).round(1)
 
